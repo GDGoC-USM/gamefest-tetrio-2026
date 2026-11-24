@@ -1,516 +1,149 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ==========================================
-    // AUTHENTICATION
-    // ==========================================
-
     function signedIn() {
       return request.auth != null;
     }
-
     function isAdmin() {
       return signedIn()
-        && exists(
-          /databases/$(database)/documents/admins/$(request.auth.uid)
-        )
-        && get(
-          /databases/$(database)/documents/admins/$(request.auth.uid)
-        ).data.role == "admin";
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == "admin";
     }
-
-    // ==========================================
-    // OLD MATCH PREDICTION VALIDATION
-    // ==========================================
-
-    function matchExists(matchId) {
-      return exists(
-        /databases/$(database)/documents/matches/$(matchId)
-      );
+    function room(id) {
+      return get(/databases/$(database)/documents/rooms/$(id)).data;
     }
-
-    function validMatch(matchId) {
-      return matchExists(matchId)
-        && get(
-          /databases/$(database)/documents/matches/$(matchId)
-        ).data.status != "completed"
-        && get(
-          /databases/$(database)/documents/matches/$(matchId)
-        ).data.winner == "";
+    function group(id) {
+      return id in ["A", "B", "C", "D"];
     }
-
-    function roundIsOpen(roundId) {
-
-      let settingId = "rounds_" + roundId;
-
-      return exists(
-        /databases/$(database)/documents/settings/$(settingId)
-      )
-        && get(
-          /databases/$(database)/documents/settings/$(settingId)
-        ).data.predictionsOpen == true;
+    function series(id) {
+      return id in ["QF1", "QF2", "QF3", "QF4", "SF1", "SF2", "FINAL", "THIRD"];
     }
-
-    function validPrediction(matchId, pick) {
-
-      return validMatch(matchId)
-        && pick is string
-        && get(
-          /databases/$(database)/documents/matches/$(matchId)
-        ).data.roundId is string
-        && roundIsOpen(
-          get(
-            /databases/$(database)/documents/matches/$(matchId)
-          ).data.roundId
-        )
-        && pick in [
-          get(
-            /databases/$(database)/documents/matches/$(matchId)
-          ).data.playerA,
-
-          get(
-            /databases/$(database)/documents/matches/$(matchId)
-          ).data.playerB
-        ];
+    function stage(id) {
+      return group(id) ? "preliminary"
+        : id in ["QF1", "QF2", "QF3", "QF4"] ? "quarterfinal"
+        : id in ["SF1", "SF2"] ? "semifinal"
+        : id in ["FINAL", "THIRD"] ? "final" : "";
     }
-
-    // ==========================================
-    // ROOM PREDICTION VALIDATION
-    // ==========================================
-
-    function roomExists(roomId) {
-
-      return exists(
-        /databases/$(database)/documents/rooms/$(roomId)
-      );
-
+    function realPlayer(key) {
+      return key is string && key.matches(".*\\S.*")
+        && !key.matches("(?i)\\s*TBD\\s*");
     }
-
-    function roomPlayers(roomId) {
-
-      return get(
-        /databases/$(database)/documents/rooms/$(roomId)
-      ).data.players;
-
+    function seed(id, index) {
+      let r = room(id);
+      return r.resultsPublished == true && r.qualifiers is list
+        && r.qualifiers.size() == 2
+        && r.qualifiers[0] != r.qualifiers[1]
+        && realPlayer(r.qualifiers[0]) && realPlayer(r.qualifiers[1])
+        && r.qualifiers[0] in r.players && r.qualifiers[1] in r.players
+        ? r.qualifiers[index] : "";
     }
-
-    function roomStage(roomId) {
-
-      return roomId in ["A", "B", "C", "D"]
-        ? "preliminary"
-
-        : roomId in ["SF1", "SF2"]
-          ? "semifinal"
-
-          : roomId == "FINAL"
-            ? "final"
-
-            : "";
-
+    function seriesResult(id, winner) {
+      let r = room(id);
+      let target = id == "FINAL" ? 11 : id in ["SF1", "SF2", "THIRD"] ? 9 : 7;
+      let first = r.scores[0] == target;
+      return r.formatVersion == 2 && r.resultsPublished == true
+        && r.players.size() == 2 && r.players[0] != r.players[1]
+        && realPlayer(r.players[0]) && realPlayer(r.players[1])
+        && r.scores is list && r.scores.size() == 2
+        && r.scores[0] is int && r.scores[1] is int
+        && r.scores[0] >= 0 && r.scores[1] >= 0
+        && ((first && r.scores[1] < target) || (r.scores[1] == target && r.scores[0] < target))
+        && r.winner == r.players[first ? 0 : 1]
+        && r.loser == r.players[first ? 1 : 0]
+        ? (winner ? r.winner : r.loser) : "";
     }
-
-    function expectedRoomSize(roomId) {
-
-      return roomId in ["A", "B", "C", "D"]
-        ? 8
-
-        : roomId in ["SF1", "SF2", "FINAL"]
-          ? 4
-
-          : 0;
-
+    function feedsMatch(id, players) {
+      return id == "QF1" ? players == [seed("A", 0), seed("B", 1)]
+        : id == "QF2" ? players == [seed("C", 0), seed("D", 1)]
+        : id == "QF3" ? players == [seed("B", 0), seed("A", 1)]
+        : id == "QF4" ? players == [seed("D", 0), seed("C", 1)]
+        : id == "SF1" ? players == [seriesResult("QF1", true), seriesResult("QF2", true)]
+        : id == "SF2" ? players == [seriesResult("QF3", true), seriesResult("QF4", true)]
+        : id == "FINAL" ? players == [seriesResult("SF1", true), seriesResult("SF2", true)]
+        : id == "THIRD" && players == [seriesResult("SF1", false), seriesResult("SF2", false)];
     }
-
-    function roomPredictionOpen(roomId) {
-
-      let stage = roomStage(roomId);
-      let settingId = "rounds_" + stage;
-
-      return stage != ""
-        && exists(
-          /databases/$(database)/documents/settings/$(settingId)
-        )
-        && get(
-          /databases/$(database)/documents/settings/$(settingId)
-        ).data.predictionsOpen == true;
-
+    function open(id) {
+      let stageId = stage(id);
+      return stageId != ""
+        && get(/databases/$(database)/documents/settings/$("rounds_" + stageId)).data.predictionsOpen == true;
     }
-
-    function roomIsReady(roomId) {
-
-      return roomExists(roomId)
-        && roomPlayers(roomId) is list
-        && roomPlayers(roomId).size() == expectedRoomSize(roomId);
-
+    function ready(id) {
+      let r = room(id);
+      return r.players is list
+        && (group(id) ? r.players.size() == 8
+          : series(id) && r.formatVersion == 2
+            && r.players.size() == 2 && r.players[0] != r.players[1]
+            && realPlayer(r.players[0]) && realPlayer(r.players[1])
+            && feedsMatch(id, r.players));
     }
-
-    function roomPredictionBaseValid(roomId, data) {
-
-      return roomIsReady(roomId)
-
-        && roomPredictionOpen(roomId)
-
-        && get(
-          /databases/$(database)/documents/rooms/$(roomId)
-        ).data.resultsPublished != true
-
-        && get(
-          /databases/$(database)/documents/rooms/$(roomId)
-        ).data.status != "completed"
-
-        && data.uid == request.auth.uid
-
-        && data.roomId == roomId
-
-        && data.stageId == roomStage(roomId)
-
-        && data.displayName is string
-
-        && data.displayName.size() <= 100
-
-        && data.updatedAt is timestamp
-
-        && data.keys().hasAll([
-          "uid",
-          "roomId",
-          "stageId",
-          "displayName",
-          "selectedPlayers",
-          "champion",
-          "runnerUp",
-          "secondRunnerUp",
-          "updatedAt"
-        ])
-
-        && data.keys().hasOnly([
-          "uid",
-          "roomId",
-          "stageId",
-          "displayName",
-          "selectedPlayers",
-          "champion",
-          "runnerUp",
-          "secondRunnerUp",
-          "updatedAt"
-        ]);
-
+    function available(id) {
+      return ready(id) && open(id)
+        && room(id).resultsPublished != true
+        && room(id).status != "completed";
     }
-
-    // ==========================================
-    // PRELIMINARY / SEMI-FINAL
-    // EXACTLY TWO PLAYERS
-    // ==========================================
-
-    function validTop2Prediction(roomId, data) {
-
-      return roomPredictionBaseValid(roomId, data)
-
-        && roomId != "FINAL"
-
+    function validPick(id, data) {
+      return available(id)
+        && data.keys().hasAll(["uid", "roomId", "stageId", "displayName", "selectedPlayers", "formatVersion", "updatedAt"])
+        && data.keys().hasOnly(["uid", "roomId", "stageId", "displayName", "selectedPlayers", "formatVersion", "updatedAt"])
+        && data.uid == request.auth.uid && data.roomId == id
+        && data.stageId == stage(id) && data.formatVersion == 2
+        && data.displayName is string && data.displayName.size() <= 100
+        && data.updatedAt is timestamp && data.updatedAt == request.time
         && data.selectedPlayers is list
-
-        && data.selectedPlayers.size() == 2
-
-        && data.selectedPlayers[0] is string
-
-        && data.selectedPlayers[0] in roomPlayers(roomId)
-
-        && data.selectedPlayers[1] is string
-
-        && data.selectedPlayers[1] in roomPlayers(roomId)
-
-        && data.selectedPlayers[0] != data.selectedPlayers[1]
-
-        && data.champion == ""
-
-        && data.runnerUp == ""
-
-        && data.secondRunnerUp == "";
-
+        && (group(id)
+          ? data.selectedPlayers.size() == 2
+            && data.selectedPlayers[0] != data.selectedPlayers[1]
+            && realPlayer(data.selectedPlayers[0]) && realPlayer(data.selectedPlayers[1])
+            && data.selectedPlayers[0] in room(id).players && data.selectedPlayers[1] in room(id).players
+          : series(id) && data.selectedPlayers.size() == 1
+            && realPlayer(data.selectedPlayers[0]) && data.selectedPlayers[0] in room(id).players);
     }
-
-    // ==========================================
-    // GRAND FINAL
-    // CHAMPION, 1ST RUNNER-UP AND 2ND RUNNER-UP
-    // ==========================================
-
-    function validFinalPrediction(roomId, data) {
-
-      return roomPredictionBaseValid(roomId, data)
-
-        && roomId == "FINAL"
-
-        && data.selectedPlayers is list
-
-        && data.selectedPlayers.size() == 0
-
-        && data.champion is string
-
-        && data.runnerUp is string
-
-        && data.secondRunnerUp is string
-
-        && data.champion in roomPlayers(roomId)
-
-        && data.runnerUp in roomPlayers(roomId)
-
-        && data.secondRunnerUp in roomPlayers(roomId)
-
-        && data.champion != data.runnerUp
-
-        && data.champion != data.secondRunnerUp
-
-        && data.runnerUp != data.secondRunnerUp;
-
+    function ownsId(id) {
+      return signedIn() && id in [
+        request.auth.uid + "_A", request.auth.uid + "_B", request.auth.uid + "_C", request.auth.uid + "_D",
+        request.auth.uid + "_QF1", request.auth.uid + "_QF2", request.auth.uid + "_QF3", request.auth.uid + "_QF4",
+        request.auth.uid + "_SF1", request.auth.uid + "_SF2", request.auth.uid + "_FINAL", request.auth.uid + "_THIRD"
+      ];
     }
-
-    function validRoomPrediction(roomId, data) {
-
-      return roomId == "FINAL"
-
-        ? validFinalPrediction(roomId, data)
-
-        : validTop2Prediction(roomId, data);
-
-    }
-
-    // ==========================================
-    // USER PREDICTION DOCUMENT OWNERSHIP
-    // ==========================================
-
-    function ownsRoomPredictionId(predictionId) {
-
-      return signedIn() && (
-
-        predictionId == request.auth.uid + "_A"
-
-        || predictionId == request.auth.uid + "_B"
-
-        || predictionId == request.auth.uid + "_C"
-
-        || predictionId == request.auth.uid + "_D"
-
-        || predictionId == request.auth.uid + "_SF1"
-
-        || predictionId == request.auth.uid + "_SF2"
-
-        || predictionId == request.auth.uid + "_FINAL"
-
-      );
-
-    }
-
-    // ==========================================
-    // ADMINS
-    // ==========================================
-
     match /admins/{uid} {
-
-      allow read: if isAdmin()
-        || (
-          signedIn()
-          && request.auth.uid == uid
-        );
-
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
       allow write: if false;
-
     }
-
-    // ==========================================
-    // ROOMS
-    // ==========================================
-
-    match /rooms/{roomId} {
-
+    match /rooms/{id} {
       allow read: if true;
-
       allow write: if isAdmin();
-
     }
-
-    // ==========================================
-    // MATCHES
-    // ==========================================
-
-    match /matches/{matchId} {
-
+    match /matches/{id} {
       allow read: if true;
-
       allow write: if isAdmin();
-
     }
-
-    // ==========================================
-    // SETTINGS
-    // ==========================================
-
-    match /settings/{settingId} {
-
+    match /settings/{id} {
       allow read: if true;
-
       allow write: if isAdmin();
-
     }
-
-    // ==========================================
-    // PREDICTIONS
-    // ==========================================
-
-    match /predictions/{predictionId} {
-
-      // ========================================
-      // READ PERMISSIONS
-      // ========================================
-
-      allow get: if isAdmin()
-
-        || ownsRoomPredictionId(predictionId)
-
-        || (
-          signedIn()
-          && resource.data.uid == request.auth.uid
-        );
-
-      allow list: if isAdmin()
-
-        || (
-          signedIn()
-          && resource.data.uid == request.auth.uid
-        );
-
-      // ========================================
-      // OLD MATCH-BASED PREDICTIONS
-      // ========================================
-
+    match /predictions/{id} {
+      allow get: if isAdmin() || ownsId(id) || (signedIn() && resource.data.uid == request.auth.uid);
+      allow list: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
       allow create: if signedIn()
-
-        && predictionId ==
-          request.auth.uid + "_" + request.resource.data.matchId
-
-        && request.resource.data.uid == request.auth.uid
-
-        && request.resource.data.matchId is string
-
-        && request.resource.data.displayName is string
-
-        && request.resource.data.displayName.size() <= 50
-
-        && validPrediction(
-          request.resource.data.matchId,
-          request.resource.data.pick
-        );
-
-      allow update: if signedIn()
-
-        && resource.data.uid == request.auth.uid
-
-        && request.resource.data.uid == resource.data.uid
-
-        && request.resource.data.matchId == resource.data.matchId
-
-        && request.resource.data.displayName is string
-
-        && request.resource.data.displayName.size() <= 50
-
-        && validPrediction(
-          resource.data.matchId,
-          request.resource.data.pick
-        );
-
-      // ========================================
-      // NEW ROOM-BASED PREDICTIONS
-      // ========================================
-
-      allow create: if signedIn()
-
-        && predictionId ==
-          request.auth.uid + "_" + request.resource.data.roomId
-
-        && validRoomPrediction(
-          request.resource.data.roomId,
-          request.resource.data
-        );
-
-      allow update: if signedIn()
-
-        && resource.data.uid == request.auth.uid
-
+        && id == request.auth.uid + "_" + request.resource.data.roomId
+        && validPick(request.resource.data.roomId, request.resource.data);
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
         && resource.data.roomId == request.resource.data.roomId
-
-        && predictionId ==
-          request.auth.uid + "_" + resource.data.roomId
-
-        && validRoomPrediction(
-          resource.data.roomId,
-          request.resource.data
-        );
-
-      // ========================================
-      // DELETE OWN PREDICTION
-      // ========================================
-
-      allow delete: if signedIn()
-
-        && resource.data.uid == request.auth.uid
-
-        && resource.data.roomId is string
-
-        && roomPredictionOpen(resource.data.roomId)
-
-        && roomIsReady(resource.data.roomId)
-
-        && get(
-          /databases/$(database)/documents/rooms/$(resource.data.roomId)
-        ).data.resultsPublished != true
-
-        && get(
-          /databases/$(database)/documents/rooms/$(resource.data.roomId)
-        ).data.status != "completed";
-
-      allow delete: if isAdmin();
-
+        && id == request.auth.uid + "_" + resource.data.roomId
+        && validPick(resource.data.roomId, request.resource.data);
+      allow delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid
+        && available(resource.data.get("roomId", resource.data.get("matchId", ""))));
     }
-
-    // ==========================================
-    // LEADERBOARD
-    // ==========================================
-
     match /leaderboard/{uid} {
-
       allow read: if true;
-
       allow write: if isAdmin();
-
     }
-
-    // ==========================================
-    // LUCKY DRAW
-    // ==========================================
-
-    match /ticketAwards/{awardId} {
-
-      allow read: if isAdmin()
-
-        || (
-          signedIn()
-          && resource.data.uid == request.auth.uid
-        );
-
+    match /ticketAwards/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
       allow create, update, delete: if isAdmin();
-
     }
-
-    // ==========================================
-    // DENY OTHER COLLECTIONS
-    // ==========================================
-
     match /{document=**} {
-
       allow read, write: if false;
-
     }
-
   }
 }

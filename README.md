@@ -1,6 +1,6 @@
-# Gamefest TETR.IO Showdown
+# GameFest TETR.IO Showdown
 
-A tournament management and audience prediction website for Gamefest 2026. Visitors follow rooms and results, sign in with Google, predict qualifiers and the final podium, and earn leaderboard points. Administrators manage the bracket, publish results, and run a weighted Lucky Draw.
+A tournament management and audience prediction website for GameFest. Visitors follow rooms and results, sign in with Google, predict group qualifiers and head-to-head winners, and earn leaderboard points. Administrators manage the bracket, publish results, and run a weighted Lucky Draw.
 
 ## Technology
 
@@ -10,7 +10,7 @@ A tournament management and audience prediction website for Gamefest 2026. Visit
 - Firebase Hosting for serving the `public/` directory.
 - Firebase JavaScript SDK 11.10.0, imported directly from Google's CDN.
 
-There is currently no `package.json`, automated test suite, or GitHub Actions deployment workflow. You do not need to run `npm install` in this repository to build the site.
+There is no `package.json`, build step, or GitHub Actions deployment workflow. The pure tournament regression scenarios use Node's built-in test runner; no dependencies are needed to run them.
 
 ## Project structure
 
@@ -38,6 +38,7 @@ There is currently no `package.json`, automated test suite, or GitHub Actions de
     └── js/
         ├── firebase-config.js  Browser Firebase configuration
         ├── shared.js           Firebase initialization, auth, and shared helpers
+        ├── tournament.js       Pure tournament format, validation, feeders, and scoring
         ├── home.js             Homepage data and sign-in controls
         ├── matches.js          Public room and result display
         ├── predict.js          Prediction selection, saving, and room updates
@@ -46,22 +47,24 @@ There is currently no `package.json`, automated test suite, or GitHub Actions de
         └── luckydraw.js        Ticket selection and winner history
 ```
 
-Page scripts share Firebase access through `shared.js`. The main Firestore collections are `rooms`, `settings`, `predictions`, `leaderboard`, `admins`, and `ticketAwards`. The rules also retain support for older match-based predictions through `matches`.
+Page scripts share Firebase access through `shared.js`. The main Firestore collections are `rooms`, `settings`, `predictions`, `leaderboard`, `admins`, and `ticketAwards`. Rules accept new room-based predictions only; legacy records remain readable and are rescored where applicable.
 
 ## Tournament behavior
 
-- Preliminary rooms `A`, `B`, `C`, and `D` each contain eight players. Two from each room qualify.
-- Semi-finals `SF1` and `SF2` each contain four players. Two from each qualify for `FINAL`.
-- The final contains four players and records Champion, 1st Runner-up, and 2nd Runner-up.
-- Audience predictions select two qualifiers per preliminary/semi-final room and an ordered final podium. Each correct pick earns 10 points.
-- Administrators control prediction availability by stage and recalculate the leaderboard from published results.
-- Lucky Draw gives participants one ticket per correct pick. Winners are excluded from subsequent draws until their award is undone.
+- Groups `A`, `B`, `C`, and `D` each have eight slots and play five rounds of cumulative free-for-all (FFA). Organisers manually publish two qualifiers in first/second order; roster order never determines seeds.
+- Eight qualifiers enter four head-to-head quarter-finals (`QF1`–`QF4`, first to 7). Semi-finals (`SF1`, `SF2`) and the third-place match (`THIRD`) are first to 9; `FINAL` is first to 11.
+- Semi-final winners enter `FINAL`; semi-final losers enter `THIRD`. The four quarter-final losers enter `PLACEMENT`: five FFA rounds, awarding 4/3/2/1 points per round. Total points determine fifth through eighth; tied totals leave placings pending until an organiser records an explicit decision.
+- Predictions select two group qualifiers (unordered for scoring) or one winner per head-to-head series. There are no predictions for FFA placement positions. Each correct selected player earns exactly **one point and one Lucky Draw ticket**. Unresolved results remain pending, not incorrect.
+- Administrators control prediction availability by stage. Leaderboard recalculation replaces absolute totals from current published results; resaving an unchanged result never adds points again. Legacy semi-final/final picks receive no old bonuses or podium scoring.
+- Lucky Draw excludes winners from subsequent draws until their award is undone.
 
-Reopening results resets dependent later rooms and deletes predictions for those dependent rooms. Predictions for the reopened room itself are retained. See [README_FIRST.txt](README_FIRST.txt) for the detailed operating rules.
+Reopening results clears the room's results, retains its players and own predictions, and transitively resets dependent rooms and deletes their predictions. Corrected confirmed results feed the bracket again. See [README_FIRST.txt](README_FIRST.txt) for exact feeds, operating steps, and outstanding organiser confirmations.
+
+Player references remain stable legacy string keys in `rooms/<id>.players`. Separate `playerDetails[key]` fields hold a text participant ID (preserving leading zeroes) and a trimmed username. Organisers enter the roster in the admin dashboard; never commit a real roster. Initialising/migrating the tournament requires explicit destructive confirmation in the admin dashboard; it never runs automatically on page load.
 
 ## Getting started
 
-Install [Git](https://git-scm.com/downloads), [Node.js LTS](https://nodejs.org/), and the [Firebase CLI](https://firebase.google.com/docs/cli):
+Install [Git](https://git-scm.com/downloads), [Node.js LTS](https://nodejs.org/), **Java 21** (required by the current Firestore emulator), and the [Firebase CLI](https://firebase.google.com/docs/cli):
 
 ```sh
 npm install -g firebase-tools
@@ -76,7 +79,7 @@ cd gamefest-tetrio-2026
 
 ### Choose the Firebase project first
 
-The checked-in client configuration and default deployment target currently point to **`gamefest-tetrio-showdown`**. Connecting GitHub to a different Firebase project does **not** change the browser's Firebase configuration.
+The checked-in client configuration and default deployment target currently point to **`gamefest-tetrio-2026`**. Connecting GitHub to a different Firebase project does **not** change the browser's Firebase configuration.
 
 Before using a replacement project:
 
@@ -103,16 +106,17 @@ The supplied Firestore rules restrict administrative writes and prevent browser 
 
 ### Run locally
 
-After confirming the Firebase project:
+Use the isolated demo project; no live backend access is needed:
 
 ```sh
-firebase login
-firebase emulators:start --only hosting
+firebase emulators:start --only auth,firestore,hosting --project demo-gamefest
 ```
 
-Open the Hosting URL printed by the CLI, normally `http://localhost:5000`. Serve the site over HTTP rather than opening HTML files with `file://`.
+Open the Hosting URL printed by the CLI, normally `http://localhost:5000`. Serve the site over HTTP rather than opening HTML files with `file://`. `firebase.json` configures Authentication on port `9099`, Firestore on `8080`, and Hosting on `5000`.
 
-**This previews Hosting only.** The current JavaScript does not connect Authentication or Firestore to emulators. Sign-in and database actions still use the project in `firebase-config.js`, even on localhost. Use a dedicated test Firebase project for development; do not publish results, reopen rooms, or run draws against event data while testing.
+On localhost, the client automatically connects Authentication to `127.0.0.1:9099` and Firestore to `127.0.0.1:8080`. It never falls back to production if an emulator is unavailable. Create synthetic local accounts and `admins/<UID>` documents with `role: "admin"` through the emulator UI at the URL printed by the CLI. Emulator accounts and documents are separate from production.
+
+Explicit production hosts retain the configured production Firebase connection. Do not use a deployed host for destructive testing. Starting Hosting alone is insufficient: run all three emulators above.
 
 ## Team collaboration: branch → pull request → main
 
@@ -183,13 +187,13 @@ Availability depends on the repository's visibility and GitHub plan. Until prote
 
 ## Verification before a PR
 
-There is no automated test command yet. Test the affected flow in a browser and report exactly what you checked:
+Run `node --test tests/tournament.test.mjs` for isolated tournament, scoring, validation, and dependency regression scenarios. These checks do not contact Firebase. Then test the affected flow in a browser and report exactly what you checked:
 
 - Public page changes: navigation, desktop/mobile layout, loading states, and console errors.
 - Authentication/predictions: signed-out and signed-in behavior, saving/resetting picks, and closed stages.
 - Tournament administration: publishing/reopening results, dependent room generation, and leaderboard scoring.
 - Lucky Draw: ticket eligibility, winner exclusion, persistence, and undo.
-- Security rules: use a test project or deliberately configured emulator tests to check authorized and unauthorized access; a UI check does not prove rule enforcement.
+- Security rules: use the isolated Auth/Firestore emulators to check authorized and unauthorized access; a UI check does not prove rule enforcement.
 
 Run only the checks relevant to your change. Do not modify live event data to verify a PR.
 

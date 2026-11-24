@@ -1,1466 +1,627 @@
 import {
   auth, db, signIn, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  isAdmin, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  serverTimestamp, escapeHTML, showMessage, query, where
+  isAdmin, collection, doc, getDoc, getDocs, setDoc, writeBatch,
+  serverTimestamp, escapeHTML, showMessage
 } from "./shared.js";
-
-const ROOM_CONFIG = [
-  { id:"A", name:"Preliminary Room A", stage:"Preliminary", stageId:"preliminary", size:8 },
-  { id:"B", name:"Preliminary Room B", stage:"Preliminary", stageId:"preliminary", size:8 },
-  { id:"C", name:"Preliminary Room C", stage:"Preliminary", stageId:"preliminary", size:8 },
-  { id:"D", name:"Preliminary Room D", stage:"Preliminary", stageId:"preliminary", size:8 },
-  { id:"SF1", name:"Semi-final Room 1", stage:"Semi-final", stageId:"semifinal", size:4 },
-  { id:"SF2", name:"Semi-final Room 2", stage:"Semi-final", stageId:"semifinal", size:4 },
-  { id:"FINAL", name:"Grand Final", stage:"Grand Final", stageId:"final", size:4 }
-];
-
-const STAGES = [
-  { id:"preliminary", name:"Preliminary" },
-  { id:"semifinal", name:"Semi-final" },
-  { id:"final", name:"Grand Final" }
-];
+import {
+  ROOM_CONFIG, STAGES, isPlayer, playerLabel, roomReady,
+  validateGroupResult, validateSeriesResult, validateFFAResult,
+  deriveRooms, dependentRoomIds, calculateLeaderboard
+} from "./tournament.js";
 
 const $ = id => document.getElementById(id);
-
 const adminLogin = $("adminLogin");
 const adminContent = $("adminContent");
-const adminMessage = $("adminMessage");
-const dashboardMessage = $("dashboardMessage");
-const authBtn = $("authBtn");
-const adminStatus = $("adminStatus");
-
-const loginBtn = $("loginBtn");
 const adminEmail = $("adminEmail");
 const adminPassword = $("adminPassword");
-
-const roomsContainer = $("roomsContainer");
-const matchesContainer = $("matchesContainer");
-const unpublishRoomBtn = $("unpublishRoomBtn");
-const stagePredictionControls = $("stagePredictionControls");
-
+const authBtn = $("authBtn");
 let roomsCache = {};
-
-// ==========================================
-// MESSAGE HANDLING
-// ==========================================
+let editorRoom = null;
+let editorId = "";
+let busy = false;
+let authorized = false;
+const configFor = id => ROOM_CONFIG.find(config => config.id === id);
+const stableJSON = value => JSON.stringify(value, (_key, item) =>
+  item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+const same = (left, right) => stableJSON(left) === stableJSON(right);
+const completed = room => room?.resultsPublished === true || room?.status === "completed";
 
 function notify(message, type = "info") {
-  showMessage(
-    adminContent.hidden ? adminMessage : dashboardMessage,
-    message,
-    type
+  showMessage(adminContent.hidden ? $("adminMessage") : $("dashboardMessage"), message, type);
+}
+
+async function persist(action) {
+  if (busy || !authorized) return;
+  busy = true;
+  const controls = [...adminContent.querySelectorAll("button, input, select")].filter(
+    element => !element.closest("#luckydraw")
   );
+  const previous = controls.map(element => element.disabled);
+  controls.forEach(element => { element.disabled = true; });
+  adminContent.setAttribute("aria-busy", "true");
+  adminContent.inert = true;
+  authBtn.disabled = true;
+  try {
+    await action();
+  } catch (error) {
+    console.error(error);
+    notify(error.message || "Unable to save. Please try again.", "error");
+  } finally {
+    busy = false;
+    controls.forEach((element, index) => { element.disabled = previous[index]; });
+    adminContent.removeAttribute("aria-busy");
+    adminContent.inert = false;
+    authBtn.disabled = false;
+    $("saveRoomBtn").disabled = completed(editorRoom);
+    $("roomStatus").disabled = completed(editorRoom);
+  }
 }
-
-function errorMessage(error) {
-  console.error(error);
-  return error?.message || "Something went wrong. Please try again.";
-}
-
-// ==========================================
-// NAVIGATION
-// ==========================================
 
 function showAdminSection(sectionId) {
+  if (busy) return;
   document.querySelectorAll(".nav-btn").forEach(button => {
     button.classList.toggle("active", button.dataset.section === sectionId);
   });
-
   document.querySelectorAll(".admin-section").forEach(section => {
     section.hidden = section.id !== sectionId;
   });
-
-  if (sectionId === "rooms") loadRooms();
-  if (sectionId === "matches") loadMatches();
-  if (sectionId === "settings") loadSettings();
 }
 
 document.querySelectorAll(".nav-btn").forEach(button => {
-  button.addEventListener("click", () => {
-    showAdminSection(button.dataset.section);
-  });
+  button.addEventListener("click", () => showAdminSection(button.dataset.section));
 });
 
-// ==========================================
-// ADMIN LOGIN
-// ==========================================
-
-loginBtn?.addEventListener("click", async () => {
+$("loginBtn").addEventListener("click", async () => {
   const email = adminEmail.value.trim();
-  const password = adminPassword.value;
-
-  if (!email || !password) {
-    notify("Please enter your administrator email and password.", "error");
+  if (!email || !adminPassword.value) {
+    notify("Enter your administrator email and password.", "error");
     return;
   }
-
-  loginBtn.disabled = true;
-  loginBtn.textContent = "LOGGING IN...";
-
+  $("loginBtn").disabled = true;
   try {
-    await signInWithEmailAndPassword(auth, email, password);
+    await signInWithEmailAndPassword(auth, email, adminPassword.value);
   } catch (error) {
-    notify(errorMessage(error), "error");
+    notify(error.message, "error");
   } finally {
-    loginBtn.disabled = false;
-    loginBtn.textContent = "Sign in to dashboard";
+    $("loginBtn").disabled = false;
   }
 });
-
 [adminEmail, adminPassword].forEach(input => {
-  input?.addEventListener("keydown", event => {
-    if (event.key === "Enter") loginBtn.click();
+  input.addEventListener("keydown", event => {
+    if (event.key === "Enter") $("loginBtn").click();
   });
 });
-
-// ==========================================
-// GOOGLE SIGN-IN / ADMIN LOGOUT
-// ==========================================
-
-authBtn?.addEventListener("click", async () => {
+authBtn.addEventListener("click", async () => {
+  if (busy) return;
+  authBtn.disabled = true;
   try {
-    if (auth.currentUser) {
-      await signOut(auth);
-    } else {
-      await signIn();
-    }
+    if (auth.currentUser) await signOut(auth);
+    else await signIn();
   } catch (error) {
-    notify(errorMessage(error), "error");
+    notify(error.message, "error");
+  } finally {
+    authBtn.disabled = false;
   }
 });
 
-// ==========================================
-// AUTHENTICATION STATE
-// ==========================================
-
 onAuthStateChanged(auth, async user => {
+  authorized = false;
   adminLogin.hidden = true;
   adminContent.hidden = true;
-  authBtn.hidden = true;
-
-  if (adminStatus) {
-    adminStatus.textContent = user
-      ? "Checking account..."
-      : "Not signed in";
-  }
-
+  authBtn.hidden = false;
+  authBtn.textContent = user ? "SIGN OUT" : "SIGN IN WITH GOOGLE";
   if (!user) {
     adminLogin.hidden = false;
     adminPassword.value = "";
-    authBtn.hidden = false;
-    authBtn.textContent = "SIGN IN WITH GOOGLE";
-
-    if (adminStatus) {
-      adminStatus.textContent = "Not signed in";
-    }
-
-    notify("Please log in using your administrator account.");
+    roomsCache = {};
+    editorRoom = null;
+    $("roomEditorCard").hidden = true;
+    notify("Sign in using your administrator account.");
     return;
   }
-
   try {
-    const authorized = await isAdmin(user);
-
-    if (!authorized) {
-      notify(
-        "Access denied. This account is not registered as an administrator.",
-        "error"
-      );
-
+    if (!await isAdmin(user)) {
       await signOut(auth);
+      notify("Access denied. This account is not an administrator.", "error");
       return;
     }
-
-    adminLogin.hidden = true;
+    authorized = true;
     adminContent.hidden = false;
-    authBtn.hidden = false;
-    authBtn.textContent = "SIGN OUT";
-
-    if (adminStatus) {
-      adminStatus.textContent = user.email || "Administrator";
-    }
-
-    notify(`Welcome, ${user.email}. Admin access verified.`, "success");
-
-    await loadAll();
-
+    await persist(async () => {
+      await Promise.all([fetchRooms(), loadSettings()]);
+      renderRooms();
+      await recalculateLeaderboard();
+      notify("Admin access verified. Rooms are unchanged; leaderboard recalculated.", "success");
+    });
   } catch (error) {
+    authorized = false;
     adminContent.hidden = true;
     adminLogin.hidden = false;
-    notify(errorMessage(error), "error");
+    notify(error.message, "error");
   }
 });
 
-// ==========================================
-// LOAD DASHBOARD
-// ==========================================
-
-async function loadAll() {
-  try {
-
-    await Promise.all([
-      loadRooms(),
-      loadMatches(),
-      loadSettings()
-    ]);
-
-    await recalculateLeaderboard();
-
-    console.log(
-      "Leaderboard updated automatically."
-    );
-
-  } catch (error) {
-
-    notify(
-      `Unable to load dashboard: ${errorMessage(error)}`,
-      "error"
-    );
-
-    console.error(
-      "Dashboard / leaderboard error:",
-      error
-    );
-
-  }
-}
-
-// ==========================================
-// ROOM HELPERS
-// ==========================================
-
-function getRoomConfig(id) {
-  return ROOM_CONFIG.find(room => room.id === id);
-}
-
-function parsePlayers(value) {
-  return value
-    .split(/\r?\n/)
-    .map(name => name.trim())
-    .filter(Boolean);
-}
-
-function playerOptions(players, selected = "") {
-  return `
-    <option value="">Select player</option>
-    ${players.filter(Boolean).map(player => `
-      <option
-        value="${escapeHTML(player)}"
-        ${player === selected ? "selected" : ""}
-      >
-        ${escapeHTML(player)}
-      </option>
-    `).join("")}
-  `;
-}
-
-function roomStatus(room = {}) {
-  if (room.resultsPublished === true || room.status === "completed") {
-    return "completed";
-  }
-
-  return room.status === "live" ? "live" : "upcoming";
-}
-
 async function fetchRooms() {
   const snapshot = await getDocs(collection(db, "rooms"));
-
-  roomsCache = {};
-
-  snapshot.forEach(roomSnapshot => {
-    roomsCache[roomSnapshot.id] = roomSnapshot.data();
-  });
-
+  roomsCache = Object.fromEntries(snapshot.docs.map(item => [item.id, item.data()]));
   return roomsCache;
 }
 
-// ==========================================
-// ROOM MANAGEMENT
-// READ-ONLY ROOM OVERVIEW
-// ==========================================
-
-async function loadRooms() {
-  try {
-    await fetchRooms();
-
-    roomsContainer.innerHTML = ROOM_CONFIG.map(config => {
-      const room = roomsCache[config.id] || {};
-
-      const players = Array.isArray(room.players)
-        ? room.players
-        : [];
-
-      const status = roomStatus(room);
-      const resultsPublished = room.resultsPublished === true;
-
-      const resultMarkup = config.stageId === "final"
-        ? (
-            resultsPublished
-              ? `
-                <div class="room-result">
-                  <b>Champion:</b>
-                  ${escapeHTML(room.champion || "TBC")}
-                  <br>
-                  <b>1st Runner-up:</b>
-                  ${escapeHTML(room.runnerUp || "TBC")}
-                  <br>
-                  <b>2nd Runner-up:</b>
-                  ${escapeHTML(room.secondRunnerUp || "TBC")}
-                </div>
-              `
-              : ""
-          )
-        : (
-            resultsPublished
-              ? `
-                <div class="room-result">
-                  <b>Official qualifiers:</b>
-                  ${escapeHTML(
-                    (room.qualifiers || []).join(" · ") || "TBC"
-                  )}
-                </div>
-              `
-              : ""
-          );
-
-      return `
-        <article class="admin-card room-overview-card">
-
-          <span class="room-tag">
-            ${escapeHTML(config.stage)}
-            &middot; ROOM ${escapeHTML(config.id)}
-          </span>
-
-          <h3>${escapeHTML(config.name)}</h3>
-
-          <p class="muted">
-            ${config.size} players
-            &middot;
-            <span class="status-${status}">
-              ${status.toUpperCase()}
-            </span>
-          </p>
-
-          <div class="room-player-list">
-            ${
-              players.length
-                ? players.map((player, index) => `
-                    <div class="room-player">
-                      <span>${String(index + 1).padStart(2, "0")}</span>
-                      <strong>${escapeHTML(player)}</strong>
-                    </div>
-                  `).join("")
-                : `
-                    <p class="muted">
-                      Players not entered yet.
-                    </p>
-                  `
-            }
-          </div>
-
-          ${resultMarkup}
-
-        </article>
-      `;
-    }).join("");
-
-  } catch (error) {
-    roomsContainer.innerHTML = `
-      <div class="notice error">
-        ${escapeHTML(errorMessage(error))}
-      </div>
-    `;
-  }
+function emptyResult(room) {
+  const clean = { ...room, status: "upcoming", resultsPublished: false };
+  for (const field of [
+    "qualifiers", "scores", "winner", "loser", "rounds", "totals", "placings",
+    "tied", "decision", "champion", "runnerUp", "secondRunnerUp", "resultsPublishedAt"
+  ]) delete clean[field];
+  return clean;
 }
 
-// ==========================================
-// MATCHES MANAGEMENT
-// SELECT ROOM / ENTER PLAYERS / RESULTS
-// ==========================================
-
-function updateRoomSelector() {
-  const select = $("room");
-
-  if (!select) return;
-
-  const current = select.value;
-
-  select.innerHTML = `
-    <option value="">Select stage / room</option>
-    ${ROOM_CONFIG.map(room => `
-      <option value="${room.id}">
-        ${escapeHTML(room.stage)} — ${escapeHTML(room.name)}
-      </option>
-    `).join("")}
-  `;
-
-  if (current) {
-    select.value = current;
-  }
-}
-
-function loadRoomEditor(roomId) {
-  const config = getRoomConfig(roomId);
-  const room = roomsCache[roomId] || {};
-
-  if (!config) return;
-
-  const players = Array.isArray(room.players)
-    ? room.players
-    : [];
-
-  $("roomPlayers").value = players.join("\n");
-
-  $("roomStatus").value =
-    room.resultsPublished === true
-      ? "completed"
-      : room.status === "live"
-        ? "live"
-        : "upcoming";
-
-  const resultFields = $("roomResultFields");
-
-  if (config.stageId === "final") {
-    resultFields.innerHTML = `
-      <div class="field">
-        <label for="champion">Champion</label>
-        <select id="champion">
-          ${playerOptions(players, room.champion || "")}
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="runnerUp">1st Runner-up</label>
-        <select id="runnerUp">
-          ${playerOptions(players, room.runnerUp || "")}
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="secondRunnerUp">2nd Runner-up</label>
-        <select id="secondRunnerUp">
-          ${playerOptions(players, room.secondRunnerUp || "")}
-        </select>
-      </div>
-    `;
-  } else {
-    const qualifiers = room.qualifiers || [];
-
-    resultFields.innerHTML = `
-      <div class="field">
-        <label for="qualifier1">First qualifier</label>
-        <select id="qualifier1">
-          ${playerOptions(players, qualifiers[0] || "")}
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="qualifier2">Second qualifier</label>
-        <select id="qualifier2">
-          ${playerOptions(players, qualifiers[1] || "")}
-        </select>
-      </div>
-    `;
-  }
-
-  $("roomPlayers").oninput = () => {
-    refreshRoomResultOptions(roomId);
+function baseRoom(config) {
+  return {
+    name: config.name, stage: config.stage, stageId: config.stage,
+    formatVersion: 2, players: Array(config.size).fill(""), playerDetails: {},
+    status: "upcoming", resultsPublished: false
   };
-
-  $("roomFormTitle").textContent = `Manage ${config.name}`;
-  $("roomEditorCard").hidden = false;
-  resultFields.dataset.room = roomId;
-
-  // Only show the reopen control after official results have been published.
-  if (unpublishRoomBtn) {
-    unpublishRoomBtn.hidden = room.resultsPublished !== true;
-  }
 }
 
-function refreshRoomResultOptions(roomId) {
-  const config = getRoomConfig(roomId);
-  const players = parsePlayers($("roomPlayers").value);
+function resultText(config, room) {
+  if (!room.resultsPublished) return "Results pending";
+  const label = key => playerLabel(room, key);
+  if (config.kind === "group") {
+    return (room.qualifiers || []).map((key, index) => `${index + 1}. ${label(key)}`).join(" / ");
+  }
+  if (config.kind === "series") {
+    if (room.formatVersion !== 2) return "Legacy result — migrate before continuing";
+    return `${label(room.winner)} wins ${(room.scores || []).join("–")}`;
+  }
+  if (!room.placings?.length) return "Totals tied — placings pending organiser decision";
+  return room.placings.map((key, index) => `${index + 5}. ${label(key)}`).join(" / ");
+}
 
+function renderRooms() {
+  $("roomsContainer").innerHTML = ROOM_CONFIG.map(config => {
+    const room = roomsCache[config.id] || baseRoom(config);
+    return `<article class="admin-card room-overview-card">
+      <span class="room-tag">${escapeHTML(config.stage)} · ${escapeHTML(config.id)}</span>
+      <h3>${escapeHTML(config.name)}</h3>
+      <p class="muted">${escapeHTML(room.status || "upcoming")}${config.target ? ` · FT${config.target}` : ""}</p>
+      <div class="room-player-list">${Array.from({ length: config.size }, (_, index) =>
+        `<div class="room-player"><span>${index + 1}</span><strong>${escapeHTML(playerLabel(room, room.players?.[index] || ""))}</strong></div>`
+      ).join("")}</div>
+      <div class="room-result">${escapeHTML(resultText(config, room))}</div>
+    </article>`;
+  }).join("");
+  const current = $("room").value;
+  $("room").innerHTML = '<option value="">Select stage / room</option>' +
+    ROOM_CONFIG.map(config =>
+      `<option value="${config.id}">${escapeHTML(config.name)}${config.target ? ` · FT${config.target}` : ""}</option>`
+    ).join("");
+  $("room").value = current;
+  $("matchesContainer").innerHTML = ROOM_CONFIG.map(config => {
+    const room = roomsCache[config.id] || {};
+    return `<div class="match-row"><div><b>${escapeHTML(config.name)}</b>
+      <p class="muted">${escapeHTML(resultText(config, room))}</p></div>
+      <button type="button" class="btn secondary edit-room" data-room="${config.id}">Manage room</button></div>`;
+  }).join("");
+  $("matchesContainer").querySelectorAll(".edit-room").forEach(button => {
+    button.addEventListener("click", () => {
+      if (busy) return;
+      $("room").value = button.dataset.room;
+      loadRoomEditor(button.dataset.room);
+      $("roomEditorCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+}
+
+// Option values are slot indexes, never player keys: legacy whitespace is preserved exactly.
+function playerOptions(room, selected = "") {
+  return '<option value="">Select participant</option>' + (room.players || []).map((key, index) =>
+    isPlayer(key) ? `<option value="${index}"${key === selected ? " selected" : ""}>${escapeHTML(playerLabel(room, key))}</option>` : ""
+  ).join("");
+}
+
+function selectedPlayer(id, room = editorRoom) {
+  const value = $(id).value;
+  return value === "" ? "" : room.players[Number(value)];
+}
+
+function rankField(id, title, room, selected = "") {
+  return `<div class="field"><label for="${id}">${escapeHTML(title)}</label>
+    <select id="${id}">${playerOptions(room, selected)}</select></div>`;
+}
+
+function loadRoomEditor(id) {
+  const config = configFor(id);
   if (!config) return;
-
-  const firstId = config.stageId === "final"
-    ? "champion"
-    : "qualifier1";
-
-  const secondId = config.stageId === "final"
-    ? "runnerUp"
-    : "qualifier2";
-
-  const previousFirst = $(firstId)?.value || "";
-  const previousSecond = $(secondId)?.value || "";
-  const previousThird = $("secondRunnerUp")?.value || "";
-
-  const resultFields = $("roomResultFields");
-
-  if (config.stageId === "final") {
-    resultFields.innerHTML = `
-      <div class="field">
-        <label for="champion">Champion</label>
-        <select id="champion">
-          ${playerOptions(players, previousFirst)}
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="runnerUp">1st Runner-up</label>
-        <select id="runnerUp">
-          ${playerOptions(players, previousSecond)}
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="secondRunnerUp">2nd Runner-up</label>
-        <select id="secondRunnerUp">
-          ${playerOptions(players, previousThird)}
-        </select>
-      </div>
-    `;
+  editorId = id;
+  editorRoom = roomsCache[id] || baseRoom(config);
+  const room = editorRoom;
+  const locked = config.kind !== "group" || completed(room);
+  $("roomEditorCard").hidden = false;
+  $("roomFormTitle").textContent = config.name;
+  $("roomStatus").value = room.status === "live" ? "live" : "upcoming";
+  $("roomStatus").disabled = completed(room);
+  $("saveRoomBtn").disabled = completed(room);
+  $("publishRoomBtn").textContent = room.resultsPublished ? "Correct published results" : "Publish Results";
+  $("unpublishRoomBtn").hidden = !completed(room);
+  $("roomPlayers").innerHTML = Array.from({ length: config.size }, (_, index) => {
+    const key = room.players?.[index] || "";
+    const detail = isPlayer(key) ? room.playerDetails?.[key] || {} : {};
+    if (config.kind !== "group") {
+      return `<div class="feeder-slot"><strong>Slot ${index + 1}: ${escapeHTML(playerLabel(room, key))}</strong>
+        <p class="muted">Read-only · ${escapeHTML(config.feeders?.[index] || "confirmed feeder result")}</p></div>`;
+    }
+    return `<fieldset class="participant-slot"${locked ? " disabled" : ""}>
+      <legend>Slot ${index + 1}</legend>
+      <div class="field"><label for="participantId${index}">Participant ID</label>
+        <input type="text" id="participantId${index}" value="${escapeHTML(detail.participantId || "")}" placeholder="GF001"></div>
+      <div class="field"><label for="username${index}">Username</label>
+        <input type="text" id="username${index}" value="${escapeHTML(isPlayer(key) ? detail.username || key.trim() : "")}" placeholder="TBD"></div>
+      <label class="empty-slot-label"><input type="checkbox" id="emptySlot${index}"${!isPlayer(key) ? " checked" : ""}> Empty slot</label>
+      <small class="muted">${isPlayer(key) ? "Existing player key is retained when editing details." : "No participant ID is saved for a blank slot."}</small>
+    </fieldset>`;
+  }).join("");
+  if (config.kind === "group") {
+    for (let index = 0; index < config.size; index++) {
+      const toggle = () => {
+        const empty = $(`emptySlot${index}`).checked;
+        $(`participantId${index}`).disabled = locked || empty;
+        $(`username${index}`).disabled = locked || empty;
+      };
+      $(`emptySlot${index}`).addEventListener("change", toggle);
+      toggle();
+    }
+  }
+  if (config.kind === "group") {
+    $("roomResultFields").innerHTML = `<p class="muted">After 5 FFA rounds, enter cumulative group ranks manually. These ordered seeds determine the quarterfinal bracket.</p>` +
+      rankField("qualifier1", "1st place qualifier", room, room.qualifiers?.[0]) +
+      rankField("qualifier2", "2nd place qualifier", room, room.qualifiers?.[1]);
+  } else if (config.kind === "series") {
+    $("roomResultFields").innerHTML = `<h3>First to ${config.target}</h3><p class="muted">Exactly one score must be ${config.target}; the losing score must be lower.</p>` +
+      (room.players || []).map((key, index) => `<div class="field">
+        <label for="seriesScore${index}">${escapeHTML(playerLabel(room, key))}</label>
+        <input type="number" id="seriesScore${index}" min="0" max="${config.target}" step="1" value="${Number.isInteger(room.scores?.[index]) ? room.scores[index] : ""}"></div>`).join("");
   } else {
-    resultFields.innerHTML = `
-      <div class="field">
-        <label for="qualifier1">First qualifier</label>
-        <select id="qualifier1">
-          ${playerOptions(players, previousFirst)}
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="qualifier2">Second qualifier</label>
-        <select id="qualifier2">
-          ${playerOptions(players, previousSecond)}
-        </select>
-      </div>
-    `;
+    $("roomResultFields").innerHTML = `<h3>Five-round placement FFA</h3>
+      <p class="muted">Enter each round’s finishing order. Points: 1st = 4, 2nd = 3, 3rd = 2, 4th = 1. Final ranks are 5th–8th. No audience predictions.</p>` +
+      Array.from({ length: 5 }, (_, round) => `<fieldset class="ffa-round"><legend>Round ${round + 1}</legend><div class="ffa-order">` +
+        Array.from({ length: 4 }, (_, place) => rankField(`ffa${round}_${place}`, `${place + 1}${["st", "nd", "rd", "th"][place]}`, room, room.rounds?.[round]?.[place])).join("") +
+        "</div></fieldset>").join("") +
+      `<div id="ffaTotals" class="room-result" role="status" aria-live="polite"></div>
+      <label class="empty-slot-label"><input type="checkbox" id="useTieDecision"${room.decision?.length ? " checked" : ""}> Apply explicit organiser ranking for tied totals</label>
+      <p class="muted">Leave unchecked to publish totals with tied placings pending. A decision must rank all players and preserve the order of unequal totals.</p>
+      <div class="ffa-order" id="tieDecisionFields">` +
+      Array.from({ length: 4 }, (_, index) => rankField(`decision${index}`, `${index + 5}th overall`, room, room.decision?.[index])).join("") + "</div>";
+    $("roomResultFields").querySelectorAll("select, input").forEach(input => {
+      input.addEventListener("change", renderFFATotals);
+    });
+    renderFFATotals();
   }
 }
 
-$("room")?.addEventListener("change", async () => {
-  const id = $("room").value;
+function readFFA(room) {
+  const rounds = Array.from({ length: 5 }, (_, round) =>
+    Array.from({ length: 4 }, (_, place) => selectedPlayer(`ffa${round}_${place}`, room)));
+  const decision = $("useTieDecision").checked
+    ? Array.from({ length: 4 }, (_, index) => selectedPlayer(`decision${index}`, room))
+    : [];
+  return { rounds, decision };
+}
 
+function renderFFATotals() {
+  $("tieDecisionFields").hidden = !$("useTieDecision").checked;
+  try {
+    const { rounds, decision } = readFFA(editorRoom);
+    const result = validateFFAResult(editorRoom, rounds, decision);
+    $("ffaTotals").textContent = editorRoom.players.map(key =>
+      `${playerLabel(editorRoom, key)}: ${result.totals[key]} points`
+    ).join(" / ") + (result.placings.length ? " · Ranking confirmed" : " · Tied placings pending organiser decision");
+  } catch (error) {
+    $("ffaTotals").textContent = error.message;
+  }
+}
+
+function readRoster() {
+  const config = configFor(editorId);
+  if (config.kind !== "group") {
+    return { players: editorRoom.players, playerDetails: editorRoom.playerDetails || {} };
+  }
+  const players = [];
+  const playerDetails = Object.create(null);
+  for (let index = 0; index < config.size; index++) {
+    if ($(`emptySlot${index}`).checked) {
+      players.push("");
+      continue;
+    }
+    const username = $(`username${index}`).value.trim();
+    const participantId = $(`participantId${index}`).value.trim();
+    if (!username) {
+      if (participantId) throw new Error(`Slot ${index + 1}: enter a username or clear the slot.`);
+      players.push("");
+      continue;
+    }
+    const originalKey = editorRoom.players?.[index];
+    if (!isPlayer(originalKey) && !participantId) {
+      throw new Error(`Slot ${index + 1}: enter a Participant ID for the new participant.`);
+    }
+    const key = isPlayer(originalKey) ? originalKey : username;
+    if (!isPlayer(key)) throw new Error("TBD is reserved for empty slots.");
+    players.push(key);
+    const previousDetail = editorRoom.playerDetails?.[key];
+    if (previousDetail || participantId || username !== key.trim()) {
+      playerDetails[key] = { participantId, username };
+    } else if (!isPlayer(originalKey)) {
+      playerDetails[key] = { participantId, username };
+    }
+  }
+  const actual = players.filter(isPlayer);
+  if (new Set(actual).size !== actual.length) throw new Error("Each participant must have a distinct player key.");
+  for (const config of ROOM_CONFIG.filter(item => item.kind === "group" && item.id !== editorId)) {
+    const other = roomsCache[config.id]?.players || [];
+    if (actual.some(key => other.includes(key))) throw new Error("A participant cannot appear in two groups.");
+  }
+  return { players, playerDetails };
+}
+
+async function freshEditor() {
+  await fetchRooms();
+  const fresh = roomsCache[editorId] || baseRoom(configFor(editorId));
+  if (!same(fresh, editorRoom)) {
+    throw new Error("This room changed since you opened it. Select the room again before saving.");
+  }
+  return fresh;
+}
+
+function requireInitialized() {
+  if (ROOM_CONFIG.some(config => !roomsCache[config.id] ||
+    (config.kind !== "group" && roomsCache[config.id].formatVersion !== 2))) {
+    throw new Error("Use Rooms → Initialize / migrate format before changing the bracket.");
+  }
+}
+
+function dependencyWarning(id, verb) {
+  const ids = dependentRoomIds(id);
+  return `${verb} ${configFor(id).name}?\n\n` +
+    (ids.length ? `Reset dependent rooms: ${ids.join(", ")}. Their results will be cleared and ALL their predictions deleted.\n\n` : "") +
+    "This room’s predictions are retained. Continue?";
+}
+
+// Source, transitive resets, feeder metadata and dependent prediction deletion commit together.
+async function writeRoomChange(id, source, resetDependents) {
+  const resetIds = resetDependents ? dependentRoomIds(id) : [];
+  const working = { ...roomsCache, [id]: source };
+  resetIds.forEach(dependentId => {
+    working[dependentId] = emptyResult(working[dependentId] || baseRoom(configFor(dependentId)));
+  });
+  const derived = deriveRooms(working);
+  const updates = new Map([[id, source]]);
+  resetIds.forEach(dependentId => {
+    updates.set(dependentId, derived[dependentId]);
+  });
+  // Metadata changes also reach unchanged feeder rosters without overwriting their results.
+  for (const [dependentId, expected] of Object.entries(derived)) {
+    if (updates.has(dependentId)) continue;
+    const current = working[dependentId];
+    if (current && same(current.players, expected.players) &&
+      !same(current.playerDetails || {}, expected.playerDetails || {})) {
+      updates.set(dependentId, { ...current, playerDetails: expected.playerDetails });
+    }
+  }
+  const predictionSnapshot = resetIds.length ? await getDocs(collection(db, "predictions")) : null;
+  const batch = writeBatch(db);
+  updates.forEach((room, roomId) => {
+    batch.set(doc(db, "rooms", roomId), { ...room, updatedAt: serverTimestamp() });
+  });
+  let deleted = 0;
+  predictionSnapshot?.docs.forEach(item => {
+    if (resetIds.includes(item.data().roomId || item.data().matchId)) {
+      batch.delete(item.ref);
+      deleted++;
+    }
+  });
+  await batch.commit();
+  await refreshAfterWrite(id);
+  return deleted;
+}
+
+async function refreshAfterWrite(id) {
+  await fetchRooms();
+  renderRooms();
+  if (id) loadRoomEditor(id);
+  try {
+    await recalculateLeaderboard();
+  } catch (error) {
+    throw new Error(`Room changes were saved, but leaderboard recalculation failed: ${error.message}. Use Recalculate leaderboard before the Lucky Draw.`);
+  }
+}
+
+$("room").addEventListener("change", async () => {
+  if (busy) return;
+  const id = $("room").value;
   if (!id) {
     $("roomEditorCard").hidden = true;
     return;
   }
-
-  await fetchRooms();
-  loadRoomEditor(id);
+  try {
+    await fetchRooms();
+    loadRoomEditor(id);
+  } catch (error) {
+    notify(error.message, "error");
+  }
 });
-
-$("saveRoomBtn")?.addEventListener("click", saveRoom);
-$("publishRoomBtn")?.addEventListener("click", publishResults);
-unpublishRoomBtn?.addEventListener("click", unpublishRoom);
-
-$("cancelRoomBtn")?.addEventListener("click", () => {
+$("cancelRoomBtn").addEventListener("click", () => {
   $("room").value = "";
   $("roomEditorCard").hidden = true;
+  editorRoom = null;
+  editorId = "";
 });
 
-// ==========================================
-// VALIDATE ROOM PLAYERS
-// ==========================================
+$("saveRoomBtn").addEventListener("click", () => persist(async () => {
+  const previous = await freshEditor();
+  requireInitialized();
+  if (completed(previous)) throw new Error("Reopen this room explicitly before editing its roster or status.");
+  const roster = readRoster();
+  const changed = !same(previous.players, roster.players) || !same(previous.playerDetails || {}, roster.playerDetails);
+  if (changed && !confirm(dependencyWarning(editorId, "Save roster changes for"))) return;
+  const source = {
+    ...(changed ? emptyResult(previous) : previous), ...roster,
+    name: configFor(editorId).name, stage: configFor(editorId).stage,
+    stageId: configFor(editorId).stage, formatVersion: 2, status: $("roomStatus").value
+  };
+  await writeRoomChange(editorId, source, changed);
+  notify("Room saved. Dependent feeders and leaderboard are up to date.", "success");
+}));
 
-function validateRoomPlayers(config, players) {
-  if (players.length !== config.size) {
-    throw new Error(
-      `${config.id} must have exactly ${config.size} players.`
-    );
+$("publishRoomBtn").addEventListener("click", () => persist(async () => {
+  const room = await freshEditor();
+  requireInitialized();
+  const config = configFor(editorId);
+  const roster = readRoster();
+  if (!same(room.players, roster.players) || !same(room.playerDetails || {}, roster.playerDetails)) {
+    throw new Error("Save participant details before publishing results. Completed rosters must be reopened first.");
   }
-
-  if (players.some(player => player.length > 60)) {
-    throw new Error("Player names must not exceed 60 characters.");
-  }
-
-  if (
-    new Set(players.map(player => player.toLowerCase())).size
-    !== players.length
-  ) {
-    throw new Error("Duplicate player names are not allowed in a room.");
-  }
-}
-
-// ==========================================
-// SAVE ROOM PLAYERS AND STATUS
-// ==========================================
-
-async function saveRoom() {
-  const id = $("room").value;
-  const config = getRoomConfig(id);
-
-  if (!config) return;
-
-  const players = parsePlayers($("roomPlayers").value);
-
-  try {
-    validateRoomPlayers(config, players);
-
-    const existing = await getDoc(doc(db, "rooms", id));
-    const previous = existing.exists()
-      ? existing.data()
-      : {};
-
-    const playersChanged =
-      JSON.stringify(previous.players || []) !==
-      JSON.stringify(players);
-
-    await setDoc(
-      doc(db, "rooms", id),
-      {
-        name: config.name,
-        stage: config.stage,
-        stageId: config.stageId,
-        players,
-        status: $("roomStatus").value,
-
-        qualifiers: playersChanged
-          ? []
-          : (previous.qualifiers || []),
-
-        champion: playersChanged
-          ? ""
-          : (previous.champion || ""),
-
-        runnerUp: playersChanged
-          ? ""
-          : (previous.runnerUp || ""),
-
-        secondRunnerUp: playersChanged
-          ? ""
-          : (previous.secondRunnerUp || ""),
-
-        resultsPublished: playersChanged
-          ? false
-          : (previous.resultsPublished === true),
-
-        updatedAt: serverTimestamp()
-      },
-      { merge: true }
-    );
-
-    await fetchRooms();
-    loadRoomEditor(id);
-    await loadRooms();
-
-    notify(
-      `${config.name} saved. Players and room status updated.`,
-      "success"
-    );
-
-  } catch (error) {
-    notify(errorMessage(error), "error");
-  }
-}
-
-// ==========================================
-// PUBLISH ROOM RESULTS
-// ==========================================
-
-async function publishResults() {
-  const id = $("room").value;
-  const config = getRoomConfig(id);
-
-  if (!config) return;
-
-  const players = parsePlayers($("roomPlayers").value);
-
-  try {
-    validateRoomPlayers(config, players);
-
-    const existing = await getDoc(doc(db, "rooms", id));
-
-    if (
-      !existing.exists() ||
-      JSON.stringify(existing.data().players || []) !==
-      JSON.stringify(players)
-    ) {
-      throw new Error(
-        "Save the room's player list before publishing results."
-      );
-    }
-
-    let result = {};
-
-    if (config.stageId === "final") {
-      const champion = $("champion")?.value;
-      const runnerUp = $("runnerUp")?.value;
-      const secondRunnerUp = $("secondRunnerUp")?.value;
-
-      const podium = [
-        champion,
-        runnerUp,
-        secondRunnerUp
-      ];
-
-      if (
-        podium.some(player => !player) ||
-        new Set(podium).size !== 3
-      ) {
-        throw new Error(
-          "Choose three different finalists for Champion, 1st Runner-up and 2nd Runner-up."
-        );
-      }
-
-      result = {
-        champion,
-        runnerUp,
-        secondRunnerUp
-      };
-
-    } else {
-      const first = $("qualifier1")?.value;
-      const second = $("qualifier2")?.value;
-
-      if (!first || !second || first === second) {
-        throw new Error("Choose two different qualifiers.");
-      }
-
-      result = {
-        qualifiers: [first, second]
-      };
-    }
-
-    if (!confirm(`Publish official results for ${config.name}?`)) {
-      return;
-    }
-
-    const official = config.stageId === "final"
-      ? [
-          result.champion,
-          result.runnerUp,
-          result.secondRunnerUp
-        ]
-      : result.qualifiers;
-
-    if (!official.every(player => players.includes(player))) {
-      throw new Error(
-        "Published results must be players in this room."
-      );
-    }
-
-    await updateDoc(
-      doc(db, "rooms", id),
-      {
-        ...result,
-        resultsPublished: true,
-        resultsPublishedAt: serverTimestamp(),
-        status: "completed",
-        updatedAt: serverTimestamp()
-      }
-    );
-
-    await fetchRooms();
-    loadRoomEditor(id);
-    await loadRooms();
-
-    notify(`${config.name} results published.`, "success");
-
-    await recalculateLeaderboard();
-
-  } catch (error) {
-    notify(errorMessage(error), "error");
-  }
-}
-
-
-// ==========================================
-// REOPEN / UNPUBLISH ROOM RESULTS
-// ==========================================
-
-// These rooms depend on qualifiers from the room being reopened.
-const ROOM_DEPENDENCIES = {
-  A: ["SF1"],
-  B: ["SF1"],
-  C: ["SF2"],
-  D: ["SF2"],
-  SF1: ["FINAL"],
-  SF2: ["FINAL"],
-  FINAL: []
-};
-
-function getDependentRoomIds(roomId) {
-  const result = [];
-  const visited = new Set();
-
-  function visit(id) {
-    for (const dependentId of ROOM_DEPENDENCIES[id] || []) {
-      if (visited.has(dependentId)) continue;
-      visited.add(dependentId);
-      result.push(dependentId);
-      visit(dependentId);
-    }
-  }
-
-  visit(roomId);
-  return result;
-}
-
-async function deletePredictionsForRooms(roomIds) {
-  let deletedCount = 0;
-
-  for (const roomId of roomIds) {
-    const predictionQuery = query(
-      collection(db, "predictions"),
-      where("roomId", "==", roomId)
-    );
-
-    const snapshot = await getDocs(predictionQuery);
-
-    for (const prediction of snapshot.docs) {
-      await deleteDoc(prediction.ref);
-      deletedCount++;
-    }
-  }
-
-  return deletedCount;
-}
-
-async function unpublishRoom() {
-  const id = $("room").value;
-  const config = getRoomConfig(id);
-
-  if (!config) return;
-
-  if (unpublishRoomBtn) {
-    unpublishRoomBtn.disabled = true;
-  }
-
-  try {
-    const sourceSnapshot = await getDoc(doc(db, "rooms", id));
-
-    if (!sourceSnapshot.exists()) {
-      throw new Error("This room has not been saved yet.");
-    }
-
-    const sourceRoom = sourceSnapshot.data();
-
-    if (sourceRoom.resultsPublished !== true) {
-      throw new Error("This room does not have published results to reopen.");
-    }
-
-    const dependentIds = getDependentRoomIds(id);
-    const dependentNames = dependentIds.map(dependentId => {
-      const dependentConfig = getRoomConfig(dependentId);
-      return dependentConfig ? dependentConfig.name : dependentId;
+  if (!roomReady(editorId, room)) throw new Error("This room does not have enough confirmed, distinct participants.");
+  let result;
+  if (config.kind === "group") {
+    result = validateGroupResult(room, [selectedPlayer("qualifier1"), selectedPlayer("qualifier2")]);
+  } else if (config.kind === "series") {
+    const scores = [0, 1].map(index => {
+      const value = $(`seriesScore${index}`).value;
+      if (value === "") throw new Error("Enter both series scores, including zero.");
+      return Number(value);
     });
-
-    let confirmation =
-      `Unpublish the official results for ${config.name} and reopen it?\n\n` +
-      `The room's player names and its users' predictions will be kept. ` +
-      `Its results will be removed and its status will return to Upcoming.`;
-
-    if (dependentNames.length) {
-      confirmation +=
-        `\n\nIMPORTANT: The following dependent room(s) will also be reset: ` +
-        `${dependentNames.join(", ")}. Their generated players and published results ` +
-        `will be cleared, and predictions saved for those dependent rooms will be deleted ` +
-        `because their player lists may no longer be valid.`;
-    }
-
-    confirmation += "\n\nDo you want to continue?";
-
-    if (!confirm(confirmation)) return;
-
-    // Reset downstream stages first so the source result is not unpublished
-    // while an existing dependent bracket is still marked as valid.
-    for (const dependentId of dependentIds) {
-      const dependentRef = doc(db, "rooms", dependentId);
-      const dependentSnapshot = await getDoc(dependentRef);
-
-      if (!dependentSnapshot.exists()) continue;
-
-      await updateDoc(dependentRef, {
-        players: [],
-        qualifiers: [],
-        champion: "",
-        runnerUp: "",
-        secondRunnerUp: "",
-        resultsPublished: false,
-        resultsPublishedAt: null,
-        status: "upcoming",
-        updatedAt: serverTimestamp()
-      });
-    }
-
-    // Remove predictions belonging to dependent rooms only. The source room's
-    // predictions are deliberately preserved so they can be scored again.
-    const deletedPredictions = await deletePredictionsForRooms(dependentIds);
-
-    await updateDoc(doc(db, "rooms", id), {
-      qualifiers: [],
-      champion: "",
-      runnerUp: "",
-      secondRunnerUp: "",
-      resultsPublished: false,
-      resultsPublishedAt: null,
-      status: "upcoming",
-      updatedAt: serverTimestamp()
-    });
-
-    await fetchRooms();
-    loadRoomEditor(id);
-    await loadRooms();
-    await loadMatches();
-    await recalculateLeaderboard();
-
-    const dependentMessage = dependentIds.length
-      ? ` Dependent rooms reset: ${dependentIds.join(", ")}.`
-      : "";
-
-    notify(
-      `${config.name} has been reopened. Its players and predictions were kept.` +
-      dependentMessage +
-      ` ${deletedPredictions} dependent-room prediction(s) were removed.`,
-      "success"
-    );
-
-  } catch (error) {
-    notify(
-      `Unable to reopen room: ${errorMessage(error)}. If this happened during the reset, review the dependent rooms before continuing.`,
-      "error"
-    );
-  } finally {
-    if (unpublishRoomBtn) {
-      unpublishRoomBtn.disabled = false;
-    }
+    result = validateSeriesResult(editorId, room, scores);
+  } else {
+    const { rounds, decision } = readFFA(room);
+    result = { ...validateFFAResult(room, rounds, decision), decision };
   }
-}
-
-// ==========================================
-// GENERATE SEMI-FINALS
-// ==========================================
-
-$("generateSemifinalsBtn")?.addEventListener("click", async () => {
-  if (!confirm(
-    "Generate SF1 from A+B and SF2 from C+D published qualifiers?"
-  )) {
+  const unchanged = room.resultsPublished === true && Object.entries(result).every(([field, value]) =>
+    ["status", "resultsPublished", "formatVersion"].includes(field) ||
+    same(field === "decision" ? room.decision || [] : room[field], value));
+  if (unchanged) {
+    await recalculateLeaderboard();
+    notify("Results unchanged. Dependent rooms and all predictions were retained; leaderboard recalculated.", "success");
     return;
   }
+  if (!confirm(dependencyWarning(editorId, room.resultsPublished ? "Correct results for" : "Publish results for"))) return;
+  const deleted = await writeRoomChange(editorId, {
+    ...emptyResult(room), ...result, resultsPublishedAt: serverTimestamp()
+  }, true);
+  notify(`Results published. ${deleted} dependent prediction(s) deleted; this room’s predictions retained.`, "success");
+}));
 
-  try {
-    const [semi1Players, semi2Players] = await Promise.all([
-      getPublishedQualifiers(["A", "B"]),
-      getPublishedQualifiers(["C", "D"])
-    ]);
+$("unpublishRoomBtn").addEventListener("click", () => persist(async () => {
+  const room = await freshEditor();
+  requireInitialized();
+  if (!completed(room)) throw new Error("This room is already open.");
+  if (!confirm(dependencyWarning(editorId, "Reopen"))) return;
+  const deleted = await writeRoomChange(editorId, emptyResult(room), true);
+  notify(`Room reopened. Its roster and predictions were retained; ${deleted} dependent prediction(s) deleted.`, "success");
+}));
 
-    await Promise.all([
-      setDoc(doc(db, "rooms", "SF1"), {
-        name: "Semi-final Room 1",
-        stage: "Semi-final",
-        stageId: "semifinal",
-        players: semi1Players,
-        qualifiers: [],
-        resultsPublished: false,
-        status: "upcoming",
-        updatedAt: serverTimestamp()
-      }),
-
-      setDoc(doc(db, "rooms", "SF2"), {
-        name: "Semi-final Room 2",
-        stage: "Semi-final",
-        stageId: "semifinal",
-        players: semi2Players,
-        qualifiers: [],
-        resultsPublished: false,
-        status: "upcoming",
-        updatedAt: serverTimestamp()
-      })
-    ]);
-
-    await fetchRooms();
-    await loadRooms();
-
-    notify("Semi-final rooms generated.", "success");
-
-  } catch (error) {
-    notify(errorMessage(error), "error");
-  }
-});
-
-// ==========================================
-// GENERATE GRAND FINAL
-// ==========================================
-
-$("generateFinalBtn")?.addEventListener("click", async () => {
-  if (!confirm(
-    "Generate Grand Final from SF1 and SF2 published qualifiers?"
-  )) {
-    return;
-  }
-
-  try {
-    const finalists = await getPublishedQualifiers(["SF1", "SF2"]);
-
-    await setDoc(doc(db, "rooms", "FINAL"), {
-      name: "Grand Final",
-      stage: "Grand Final",
-      stageId: "final",
-      players: finalists,
-      qualifiers: [],
-      champion: "",
-      runnerUp: "",
-      secondRunnerUp: "",
-      resultsPublished: false,
-      status: "upcoming",
-      updatedAt: serverTimestamp()
-    });
-
-    await fetchRooms();
-    await loadRooms();
-
-    notify("Grand Final room generated.", "success");
-
-  } catch (error) {
-    notify(errorMessage(error), "error");
-  }
-});
-
-async function getPublishedQualifiers(roomIds) {
-  const result = [];
-
-  for (const id of roomIds) {
-    const snapshot = await getDoc(doc(db, "rooms", id));
-
-    if (!snapshot.exists()) {
-      throw new Error(`Room ${id} has not been configured.`);
+$("initializeTournamentBtn").addEventListener("click", () => persist(async () => {
+  await fetchRooms();
+  const working = { ...roomsCache };
+  const resetIds = new Set();
+  const updates = new Map();
+  for (const config of ROOM_CONFIG) {
+    if (config.kind === "group") {
+      if (!working[config.id]) {
+        working[config.id] = baseRoom(config);
+        updates.set(config.id, working[config.id]);
+      }
+      continue;
     }
-
-    const data = snapshot.data();
-    const qualifiers = data.qualifiers || [];
-    const players = data.players || [];
-
-    if (data.resultsPublished !== true) {
-      throw new Error(`Publish Room ${id} results first.`);
+    const current = working[config.id];
+    if (!current || current.formatVersion !== 2 || !Array.isArray(current.players) || current.players.length !== config.size) {
+      resetIds.add(config.id);
+      dependentRoomIds(config.id).forEach(id => resetIds.add(id));
     }
-
-    if (
-      qualifiers.length !== 2 ||
-      qualifiers[0] === qualifiers[1] ||
-      !qualifiers.every(player => players.includes(player))
-    ) {
-      throw new Error(`${id} needs two valid published qualifiers.`);
+  }
+  resetIds.forEach(id => {
+    working[id] = emptyResult(baseRoom(configFor(id)));
+  });
+  const derived = deriveRooms(working);
+  // An explicit migration also repairs feeder drift, resetting all affected descendants.
+  for (const config of ROOM_CONFIG.filter(item => item.kind !== "group")) {
+    if (!same(working[config.id]?.players, derived[config.id].players)) {
+      resetIds.add(config.id);
+      dependentRoomIds(config.id).forEach(id => resetIds.add(id));
     }
-
-    result.push(...qualifiers);
   }
-
-  if (
-    new Set(result.map(player => player.toLowerCase())).size
-    !== result.length
-  ) {
-    throw new Error("A player cannot qualify more than once.");
+  resetIds.forEach(id => { working[id] = emptyResult(baseRoom(configFor(id))); });
+  const finalDerived = deriveRooms(working);
+  resetIds.forEach(id => updates.set(id, finalDerived[id]));
+  for (const [id, expected] of Object.entries(finalDerived)) {
+    if (!resetIds.has(id) && !same(working[id]?.playerDetails || {}, expected.playerDetails || {})) {
+      updates.set(id, { ...working[id], playerDetails: expected.playerDetails });
+    }
   }
-
-  return result;
-}
-
-// ==========================================
-// MATCHES MANAGEMENT - ROOM SUMMARY
-// ==========================================
-
-async function loadMatches() {
-  updateRoomSelector();
-
-  try {
-    await fetchRooms();
-
-    matchesContainer.innerHTML = ROOM_CONFIG.map(config => {
-      const room = roomsCache[config.id] || {};
-      const players = room.players || [];
-      const published = room.resultsPublished === true;
-
-      const result = config.stageId === "final"
-        ? (
-            published
-              ? `Champion: ${escapeHTML(room.champion || "—")} · 1st Runner-up: ${escapeHTML(room.runnerUp || "—")} · 2nd Runner-up: ${escapeHTML(room.secondRunnerUp || "—")}`
-              : "Results not published"
-          )
-        : (
-            published
-              ? `Qualifiers: ${escapeHTML((room.qualifiers || []).join(" · ") || "—")}`
-              : "Results not published"
-          );
-
-      return `
-        <div class="match-row">
-          <div>
-            <b>
-              ${escapeHTML(config.stage)}
-              / ${escapeHTML(config.id)}
-            </b>
-
-            <div class="muted">
-              ${players.length}/${config.size} players
-              · ${escapeHTML(room.status || "upcoming")}
-            </div>
-
-            <small class="score">${result}</small>
-          </div>
-
-          <div class="actions">
-            <button type="button"
-              class="btn secondary edit-room"
-              data-room="${config.id}">
-              Manage room
-            </button>
-          </div>
-        </div>
-      `;
-    }).join("");
-
-    matchesContainer.querySelectorAll(".edit-room").forEach(button => {
-      button.addEventListener("click", async () => {
-        const id = button.dataset.room;
-
-        $("room").value = id;
-
-        await fetchRooms();
-        loadRoomEditor(id);
-
-        $("roomEditorCard").scrollIntoView({
-          behavior: "smooth",
-          block: "start"
-        });
-      });
-    });
-
-  } catch (error) {
-    matchesContainer.innerHTML = `
-      <div class="notice error">
-        ${escapeHTML(errorMessage(error))}
-      </div>
-    `;
-  }
-}
-
-// ==========================================
-// LEADERBOARD CALCULATION
-// ==========================================
+  if (!confirm("Initialize / migrate this tournament?\n\n" +
+    `Reset rooms: ${[...resetIds].join(", ") || "none"}.\n` +
+    "All predictions for reset rooms will be deleted. Group players, metadata, results and predictions are retained exactly. Existing compatible rooms retain their results.\n\nContinue?")) return;
+  const predictions = await getDocs(collection(db, "predictions"));
+  const batch = writeBatch(db);
+  updates.forEach((room, id) => batch.set(doc(db, "rooms", id), {
+    ...room, updatedAt: serverTimestamp()
+  }));
+  predictions.docs.forEach(item => {
+    if (resetIds.has(item.data().roomId || item.data().matchId)) batch.delete(item.ref);
+  });
+  await batch.commit();
+  await refreshAfterWrite(editorId);
+  notify("Tournament format initialized. Group data and group predictions were retained.", "success");
+}));
 
 async function recalculateLeaderboard() {
-
-  const [
-    predictionSnapshot,
-    roomSnapshot,
-    leaderboardSnapshot
-  ] = await Promise.all([
-
-    getDocs(collection(db, "predictions")),
-
-    getDocs(collection(db, "rooms")),
-
+  const [predictionSnapshot, roomSnapshot, leaderboardSnapshot] = await Promise.all([
+    getDocs(collection(db, "predictions")), getDocs(collection(db, "rooms")),
     getDocs(collection(db, "leaderboard"))
-
   ]);
-
-  // ========================================
-  // LOAD OFFICIAL ROOM RESULTS
-  // ========================================
-
-  const rooms = {};
-
-  roomSnapshot.forEach(item => {
-
-    rooms[item.id] = item.data();
-
+  const rooms = Object.fromEntries(roomSnapshot.docs.map(item => [item.id, item.data()]));
+  const predictions = predictionSnapshot.docs.map(item => ({ ...item.data(), id: item.id }));
+  const rows = calculateLeaderboard(predictions, rooms).sort((left, right) =>
+    right.correct - left.correct || left.displayName.localeCompare(right.displayName));
+  const retained = new Set(rows.map(row => row.uid));
+  // Ranking writes are absolute and independently repeatable; bracket mutations above are one atomic batch.
+  const operations = rows.map((row, index) => batch => batch.set(doc(db, "leaderboard", row.uid), {
+    ...row, points: row.correct, rank: index + 1, updatedAt: serverTimestamp()
+  }));
+  leaderboardSnapshot.docs.forEach(item => {
+    if (!retained.has(item.id)) operations.push(batch => batch.delete(item.ref));
   });
-
-  // ========================================
-  // PREPARE PARTICIPANTS
-  // ========================================
-
-  const people = {};
-
-  function getPerson(prediction) {
-
-    if (!prediction.uid) return null;
-
-    if (!people[prediction.uid]) {
-
-      people[prediction.uid] = {
-
-        uid: prediction.uid,
-
-        displayName:
-          prediction.displayName || "Player",
-
-        correct: 0,
-
-        points: 0
-
-      };
-
-    }
-
-    return people[prediction.uid];
-
+  for (let index = 0; index < operations.length; index += 450) {
+    const batch = writeBatch(db);
+    operations.slice(index, index + 450).forEach(operation => operation(batch));
+    await batch.commit();
   }
-
-  // ========================================
-  // CALCULATE EACH PREDICTION
-  // ========================================
-
-  predictionSnapshot.forEach(item => {
-
-    const prediction = item.data();
-
-    // Ignore old match-based predictions.
-    if (prediction.matchId) return;
-
-    const person = getPerson(prediction);
-
-    if (!person) return;
-
-    const room = rooms[prediction.roomId];
-
-    // Only calculate rooms with published results.
-    if (
-      !room ||
-      room.resultsPublished !== true
-    ) {
-      return;
-    }
-
-    // ======================================
-    // PRELIMINARY / SEMI-FINAL TOP 2
-    // ======================================
-
-    if (
-      prediction.stageId === "preliminary" ||
-      prediction.stageId === "semifinal"
-    ) {
-
-      const predicted = Array.isArray(
-        prediction.selectedPlayers
-      )
-        ? prediction.selectedPlayers
-        : [];
-
-      const official = Array.isArray(
-        room.qualifiers
-      )
-        ? room.qualifiers
-        : [];
-
-      if (
-        predicted.length !== 2 ||
-        official.length !== 2
-      ) {
-        return;
-      }
-
-      // Order does not matter.
-      const correctCount = predicted.filter(
-        player => official.includes(player)
-      ).length;
-
-      person.correct += correctCount;
-      person.points += correctCount * 10;
-
-    }
-
-    // ======================================
-    // GRAND FINAL
-    // ======================================
-
-    if (prediction.stageId === "final") {
-
-      // Champion must match Champion.
-      if (
-        prediction.champion &&
-        prediction.champion === room.champion
-      ) {
-
-        person.correct += 1;
-        person.points += 10;
-
-      }
-
-      // 1st Runner-up must match 1st Runner-up.
-      if (
-        prediction.runnerUp &&
-        prediction.runnerUp === room.runnerUp
-      ) {
-
-        person.correct += 1;
-        person.points += 10;
-
-      }
-
-      // 2nd Runner-up must match 2nd Runner-up.
-      if (
-        prediction.secondRunnerUp &&
-        prediction.secondRunnerUp === room.secondRunnerUp
-      ) {
-
-        person.correct += 1;
-        person.points += 10;
-
-      }
-
-    }
-
-  });
-
-  // ========================================
-  // SORT PARTICIPANTS
-  // ========================================
-
-  const rows = Object.values(people).sort(
-
-    (a, b) =>
-
-      b.points - a.points ||
-
-      b.correct - a.correct ||
-
-      a.displayName.localeCompare(b.displayName)
-
-  );
-
-  // ========================================
-  // SAVE CALCULATED SCORES TO FIRESTORE
-  // ========================================
-
-  const updatedIds = new Set();
-
-  for (
-    let index = 0;
-    index < rows.length;
-    index++
-  ) {
-
-    const person = rows[index];
-
-    updatedIds.add(person.uid);
-
-    await setDoc(
-
-      doc(
-        db,
-        "leaderboard",
-        person.uid
-      ),
-
-      {
-
-        uid: person.uid,
-
-        displayName: person.displayName,
-
-        correct: person.correct,
-
-        points: person.points,
-
-        rank: index + 1,
-
-        updatedAt: serverTimestamp()
-
-      }
-
-    );
-
-  }
-
-  // ========================================
-  // REMOVE OLD LEADERBOARD ENTRIES
-  // ========================================
-
-  for (const item of leaderboardSnapshot.docs) {
-
-    if (!updatedIds.has(item.id)) {
-
-      await deleteDoc(
-        doc(db, "leaderboard", item.id)
-      );
-
-    }
-
-  }
-
-  console.log(
-    "LEADERBOARD SUCCESSFULLY RECALCULATED:",
-    rows
-  );
-
   return rows;
-
 }
 
-// ==========================================
-// PREDICTION SETTINGS
-// ==========================================
-
-function stageSettingsRef(stageId) {
-  return doc(db, "settings", `rounds_${stageId}`);
-}
+$("recalculateLeaderboardBtn").addEventListener("click", () => persist(async () => {
+  await recalculateLeaderboard();
+  notify("Leaderboard replaced with correct-pick totals. Refresh Lucky Draw tickets before spinning.", "success");
+}));
 
 async function loadSettings() {
-  const snapshots = await Promise.all(
-    STAGES.map(stage => getDoc(stageSettingsRef(stage.id)))
-  );
-
-  stagePredictionControls.innerHTML = STAGES.map((stage, index) => {
-    const data = snapshots[index].exists()
-      ? snapshots[index].data()
-      : {};
-
-    const open = data.predictionsOpen === true;
-
-    return `
-      <article class="admin-card">
-        <h3>${escapeHTML(stage.name)}</h3>
-
-        <p class="muted">
-          Predictions are ${open ? "OPEN" : "CLOSED"}.
-        </p>
-
-        <button
-          type="button"
-          class="btn ${open ? "red" : ""} stage-toggle"
-          data-stage="${stage.id}"
-          data-open="${open}"
-        >
-          ${open ? "CLOSE" : "OPEN"} PREDICTIONS
-        </button>
-      </article>
-    `;
+  const snapshots = await Promise.all(STAGES.map(stage =>
+    getDoc(doc(db, "settings", `rounds_${stage.id}`))));
+  $("stagePredictionControls").innerHTML = STAGES.map((stage, index) => {
+    const open = snapshots[index].exists() && snapshots[index].data().predictionsOpen === true;
+    return `<article class="admin-card"><h3>${escapeHTML(stage.name)}</h3>
+      <p class="muted">Predictions are ${open ? "OPEN" : "CLOSED"}.</p>
+      <button type="button" class="btn ${open ? "red" : ""} stage-toggle"
+        data-stage="${stage.id}" data-open="${open}">${open ? "CLOSE" : "OPEN"} PREDICTIONS</button></article>`;
   }).join("");
-
-  stagePredictionControls.querySelectorAll(".stage-toggle").forEach(button => {
-    button.addEventListener("click", () => toggleStage(button));
+  $("stagePredictionControls").querySelectorAll(".stage-toggle").forEach(button => {
+    button.addEventListener("click", () => persist(async () => {
+      const open = button.dataset.open !== "true";
+      await setDoc(doc(db, "settings", `rounds_${button.dataset.stage}`), {
+        predictionsOpen: open, updatedAt: serverTimestamp()
+      }, { merge: true });
+      await loadSettings();
+      notify(`${button.dataset.stage} predictions are now ${open ? "OPEN" : "CLOSED"}.`, "success");
+    }));
   });
-}
-
-async function toggleStage(button) {
-  const stageId = button.dataset.stage;
-  const currentlyOpen = button.dataset.open === "true";
-  const nextOpen = !currentlyOpen;
-
-  button.disabled = true;
-
-  try {
-    await setDoc(
-      stageSettingsRef(stageId),
-      {
-        predictionsOpen: nextOpen,
-        updatedAt: serverTimestamp()
-      },
-      { merge: true }
-    );
-
-    await loadSettings();
-
-    notify(
-      `${stageId} predictions are now ${nextOpen ? "OPEN" : "CLOSED"}.`,
-      "success"
-    );
-
-  } catch (error) {
-    button.disabled = false;
-    notify(errorMessage(error), "error");
-  }
 }

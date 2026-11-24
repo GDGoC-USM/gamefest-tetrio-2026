@@ -1,278 +1,143 @@
-import {
-  db,
-  collection,
-  onSnapshot,
-  escapeHTML
-} from "./shared.js";
+import { db, collection, onSnapshot, escapeHTML } from "./shared.js";
+import { ROOM_CONFIG, deriveRooms, isPlayer, playerLabel, roomReady } from "./tournament.js";
 
 const host = document.getElementById("matchList");
-
-const totalEl = document.getElementById("totalMatches");
-const liveEl = document.getElementById("liveMatches");
-const upcomingEl = document.getElementById("upcomingMatches");
-const completedEl = document.getElementById("completedMatches");
-
-const ROOM_ORDER = [
-  "A", "B", "C", "D", "SF1", "SF2", "FINAL"
-];
-
-const ROOM_META = {
-  A: {
-    stage: "Preliminary",
-    name: "Preliminary Room A",
-    size: 8
-  },
-  B: {
-    stage: "Preliminary",
-    name: "Preliminary Room B",
-    size: 8
-  },
-  C: {
-    stage: "Preliminary",
-    name: "Preliminary Room C",
-    size: 8
-  },
-  D: {
-    stage: "Preliminary",
-    name: "Preliminary Room D",
-    size: 8
-  },
-  SF1: {
-    stage: "Semi-final",
-    name: "Semi-final SF1",
-    size: 4
-  },
-  SF2: {
-    stage: "Semi-final",
-    name: "Semi-final SF2",
-    size: 4
-  },
-  FINAL: {
-    stage: "Grand Final",
-    name: "Grand Final",
-    size: 4
-  }
-};
-
 let rooms = {};
+let derived = {};
 let currentFilter = "all";
 
-// ==========================================
-// ROOM STATUS
-// ==========================================
-
-function getStatus(room = {}) {
-  if (
-    room.resultsPublished === true ||
-    room.status === "completed"
-  ) {
-    return "completed";
-  }
-
-  if (room.status === "live") {
-    return "live";
-  }
-
-  return "upcoming";
+function currentRoom(config) {
+  const stored = rooms[config.id] || {};
+  if (config.kind === "group") return stored;
+  const expected = derived[config.id] || {};
+  const confirmed = roomReady(config.id, stored) &&
+    expected.players?.every((key, index) => isPlayer(key) && key === stored.players[index]);
+  return {
+    ...stored,
+    players: expected.players || [],
+    playerDetails: { ...stored.playerDetails, ...expected.playerDetails },
+    resultsPublished: confirmed && stored.resultsPublished === true,
+    status: confirmed ? stored.status : "upcoming"
+  };
 }
 
-// ==========================================
-// ROOM RESULTS
-// ==========================================
-
-function getRoomResult(room, roomId) {
-  if (!room.resultsPublished) {
-    return "RESULTS NOT YET PUBLISHED";
-  }
-
-  if (roomId === "FINAL") {
-    return `
-      CHAMPION: ${escapeHTML(room.champion || "TBC")}
-      · RUNNER-UP: ${escapeHTML(room.runnerUp || "TBC")}
-    `;
-  }
-
-  return `
-    OFFICIAL QUALIFIERS:
-    ${escapeHTML((room.qualifiers || []).join(" · ") || "TBC")}
-  `;
+function statusOf(room) {
+  return room.resultsPublished === true ? "completed" : room.status === "live" ? "live" : "upcoming";
 }
 
-// ==========================================
-// CREATE ROOM CARD
-// ==========================================
-
-function createRoomCard(roomId) {
-  const room = rooms[roomId] || {};
-  const config = ROOM_META[roomId];
-
-  const status = getStatus(room);
-
-  const players = Array.isArray(room.players)
-    ? room.players
-    : [];
-
-  return `
-    <article class="match-card room-card">
-
-      <div class="match-card-top">
-        <span class="match-number">
-          ${escapeHTML(config.stage)}
-          · ROOM ${escapeHTML(roomId)}
-        </span>
-
-        <span class="match-status status-${status}">
-          ${status.toUpperCase()}
-        </span>
-      </div>
-
-      <div class="room-public-players">
-        <h3>${escapeHTML(config.name)}</h3>
-
-        ${
-          players.length
-            ? players.map((player, index) => `
-                <div class="room-player">
-                  <span>PLAYER ${String(index + 1).padStart(2, "0")}</span>
-                  <strong>${escapeHTML(player)}</strong>
-                </div>
-              `).join("")
-            : `
-                <p class="muted">
-                  Players to be announced.
-                </p>
-              `
-        }
-      </div>
-
-      <div class="match-card-bottom">
-        <span class="match-result">
-          ${getRoomResult(room, roomId)}
-        </span>
-      </div>
-
-    </article>
-  `;
+function resultText(config, room) {
+  if (!room.resultsPublished) return "Results not yet published";
+  if (config.kind === "group") {
+    return (room.qualifiers || []).map((key, index) =>
+      `${config.id}${index + 1}: ${playerLabel(room, key)}`).join(" · ") || "Qualifiers pending";
+  }
+  if (config.kind === "series") {
+    return isPlayer(room.winner) ? `Winner: ${playerLabel(room, room.winner)}` : "Winner pending";
+  }
+  return room.tied && !room.placings?.length
+    ? "Tied totals — organiser decision pending"
+    : "Official 5th–8th placings";
 }
 
-// ==========================================
-// DISPLAY ROOMS
-// ==========================================
+function card(config, bracket = false) {
+  const room = currentRoom(config);
+  const status = statusOf(room);
+  const filtered = currentFilter !== "all" && status !== currentFilter;
+  const players = Array.from({ length: config.size }, (_, index) => room.players?.[index] || "");
+  return `<article class="match-card tournament-card ${bracket ? "bracket-card" : ""} ${filtered ? "filter-muted" : ""}"
+      id="room-${config.id}" aria-label="${escapeHTML(config.name)}">
+    <div class="match-card-top">
+      <span class="match-number">${escapeHTML(config.id)}</span>
+      <span class="match-status status-${status}">${status.toUpperCase()}</span>
+    </div>
+    <h3>${escapeHTML(config.name)}</h3>
+    <p class="series-target">${config.kind === "series" ? `First to ${config.target} wins` : "8 slots · 2 ordered qualifiers"}</p>
+    <div class="tournament-players">${players.map((key, index) => `
+      <div class="tournament-player ${room.resultsPublished && room.winner === key ? "is-winner" : ""}">
+        <span class="slot-label">${config.kind === "group" ? `Slot ${index + 1}` : escapeHTML(config.feeders?.[index] || "TBD")}</span>
+        <strong>${escapeHTML(playerLabel(room, key))}</strong>
+        ${config.kind === "series" ? `<b class="series-score">${room.resultsPublished && Number.isInteger(room.scores?.[index]) ? room.scores[index] : "—"}</b>` : ""}
+      </div>`).join("")}</div>
+    <p class="tournament-result">${escapeHTML(resultText(config, room))}</p>
+  </article>`;
+}
+
+function placementTable(config) {
+  const room = currentRoom(config);
+  const published = room.resultsPublished === true;
+  const placings = published && Array.isArray(room.placings) ? room.placings : [];
+  const players = placings.length ? placings : Array.from({ length: 4 }, (_, index) => room.players?.[index] || "");
+  const filtered = currentFilter !== "all" && statusOf(room) !== currentFilter;
+  return `<section class="placement-section ${filtered ? "filter-muted" : ""}" id="room-PLACEMENT">
+    <div class="match-group-heading"><div><span class="match-group-label">PLACEMENT</span><h3>5TH–8TH PLAYOFF</h3></div>
+      <span class="pill">${statusOf(room).toUpperCase()}</span></div>
+    <p class="muted">Four quarter-final losers · five free-for-all rounds · 4 / 3 / 2 / 1 points per round. No audience predictions.</p>
+    <div class="table-wrap"><table class="placement-table">
+      <thead><tr><th>Place</th><th>Participant</th>${[1, 2, 3, 4, 5].map(round => `<th>R${round}</th>`).join("")}<th>Total</th></tr></thead>
+      <tbody>${players.map((key, index) => {
+        const total = published && isPlayer(key) ? room.totals?.[key] : undefined;
+        return `<tr><td>${placings.length ? index + 5 : "Pending"}</td>
+          <td><strong>${escapeHTML(playerLabel(room, key))}</strong>${!isPlayer(key) ? `<small>${escapeHTML(config.feeders?.[index] || "TBD")}</small>` : ""}</td>
+          ${[0, 1, 2, 3, 4].map(round => {
+            const finish = published && isPlayer(key) && Array.isArray(room.rounds?.[round]) ? room.rounds[round].indexOf(key) : -1;
+            return `<td>${finish >= 0 ? 4 - finish : "—"}</td>`;
+          }).join("")}<td><strong>${Number.isFinite(total) ? total : "—"}</strong></td></tr>`;
+      }).join("")}</tbody>
+    </table></div>
+    <p class="tournament-result" role="status">${escapeHTML(resultText(config, room))}</p>
+  </section>`;
+}
 
 function renderRooms() {
-  const filteredRoomIds = ROOM_ORDER.filter(roomId => {
-    if (currentFilter === "all") {
-      return true;
-    }
-
-    return getStatus(rooms[roomId] || {}) === currentFilter;
-  });
-
-  totalEl.textContent = ROOM_ORDER.length;
-
-  liveEl.textContent = ROOM_ORDER.filter(
-    roomId => getStatus(rooms[roomId] || {}) === "live"
-  ).length;
-
-  upcomingEl.textContent = ROOM_ORDER.filter(
-    roomId => getStatus(rooms[roomId] || {}) === "upcoming"
-  ).length;
-
-  completedEl.textContent = ROOM_ORDER.filter(
-    roomId => getStatus(rooms[roomId] || {}) === "completed"
-  ).length;
-
-  if (!filteredRoomIds.length) {
-    host.innerHTML = `
-      <div class="matches-empty-state">
-        <h3>NO ROOMS FOUND</h3>
-        <p>No rooms match this status filter.</p>
-      </div>
-    `;
-    return;
-  }
-
-  const groups = {};
-
-  filteredRoomIds.forEach(roomId => {
-    const stage = ROOM_META[roomId].stage;
-
-    if (!groups[stage]) {
-      groups[stage] = [];
-    }
-
-    groups[stage].push(roomId);
-  });
-
-  host.innerHTML = Object.entries(groups).map(([stage, roomIds]) => `
-    <section class="match-group">
-
-      <div class="match-group-heading">
-        <div>
-          <span class="match-group-label">
-            ${escapeHTML(stage)}
-          </span>
-
-          <h3>ROOM OVERVIEW</h3>
-        </div>
-
-        <span class="match-group-count">
-          ${roomIds.length}
-          ${roomIds.length === 1 ? "ROOM" : "ROOMS"}
-        </span>
-      </div>
-
-      <div class="match-grid">
-        ${roomIds.map(createRoomCard).join("")}
-      </div>
-
+  const configurations = ROOM_CONFIG;
+  const counts = { live: 0, upcoming: 0, completed: 0 };
+  configurations.forEach(config => counts[statusOf(currentRoom(config))]++);
+  document.getElementById("totalMatches").textContent = configurations.length;
+  document.getElementById("liveMatches").textContent = counts.live;
+  document.getElementById("upcomingMatches").textContent = counts.upcoming;
+  document.getElementById("completedMatches").textContent = counts.completed;
+  const find = id => configurations.find(config => config.id === id);
+  const groups = configurations.filter(config => config.kind === "group" &&
+    (currentFilter === "all" || statusOf(currentRoom(config)) === currentFilter));
+  host.innerHTML = `
+    <section class="match-group"><div class="match-group-heading"><div>
+      <span class="match-group-label">GROUP STAGE</span><h3>32 PLAYERS. EIGHT QUALIFIERS.</h3>
+    </div></div><p class="muted">Slots are roster positions, not standings. Only published A1–D2 qualifiers determine the bracket.</p>
+      <div class="match-grid">${groups.map(config => card(config)).join("") || '<p class="muted">No groups match this filter.</p>'}</div>
     </section>
-  `).join("");
+    <section class="match-group"><div class="match-group-heading"><div>
+      <span class="match-group-label">KNOCKOUT BRACKET</span><h3>THE ROAD TO THE TITLE</h3>
+    </div></div><p class="muted">Follow each connecting line to the next series. ${currentFilter !== "all" ? "Other statuses are dimmed to preserve the bracket." : "Seeds and feeder labels remain visible until players are confirmed."}</p>
+      <div class="knockout-bracket" aria-label="Quarter-finals feed semi-finals, then the grand final">
+        <section class="bracket-round round-quarterfinal"><h4>QUARTER-FINALS <span>First to 7</span></h4>
+          <div class="bracket-matches">${["QF1", "QF2", "QF3", "QF4"].map(id => card(find(id), true)).join("")}</div></section>
+        <section class="bracket-round round-semifinal"><h4>SEMI-FINALS <span>First to 9</span></h4>
+          <div class="bracket-matches">${["SF1", "SF2"].map(id => card(find(id), true)).join("")}</div></section>
+        <section class="bracket-round round-final"><h4>GRAND FINAL <span>First to 11</span></h4>
+          <div class="bracket-matches">${card(find("FINAL"), true)}</div></section>
+      </div>
+      <section class="third-place-section"><div><span class="match-group-label">A SEPARATE DECIDER</span><h3>THIRD PLACE</h3>
+        <p class="muted">The two semi-final losers play for third. First to 9 wins.</p></div>${card(find("THIRD"))}</section>
+    </section>
+    ${placementTable(find("PLACEMENT"))}`;
 }
-
-// ==========================================
-// FILTER BUTTONS
-// ==========================================
 
 document.querySelectorAll(".match-filter").forEach(button => {
   button.addEventListener("click", () => {
     currentFilter = button.dataset.filter;
-
     document.querySelectorAll(".match-filter").forEach(item => {
-      item.classList.remove("active");
+      item.classList.toggle("active", item === button);
+      item.setAttribute("aria-pressed", String(item === button));
     });
-
-    button.classList.add("active");
-
     renderRooms();
   });
 });
 
-// ==========================================
-// FIREBASE LIVE ROOM UPDATES
-// ==========================================
-
-onSnapshot(
-  collection(db, "rooms"),
-
-  snapshot => {
-    rooms = {};
-
-    snapshot.forEach(document => {
-      rooms[document.id] = document.data();
-    });
-
-    renderRooms();
-  },
-
-  error => {
-    console.error("Unable to load rooms:", error);
-
-    host.innerHTML = `
-      <div class="notice error">
-        Unable to load room information.
-        Please refresh the page and try again.
-      </div>
-    `;
-  }
-);
+onSnapshot(collection(db, "rooms"), snapshot => {
+  rooms = Object.fromEntries(snapshot.docs.map(document => [document.id, document.data()]));
+  derived = deriveRooms(rooms);
+  renderRooms();
+}, error => {
+  console.error("Unable to load rooms:", error);
+  host.innerHTML = '<div class="notice error">Unable to load tournament rooms. Refresh to try again.</div>';
+});

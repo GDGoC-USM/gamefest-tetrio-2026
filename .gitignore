@@ -10,3 +10,6 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Local tournament fixtures and verification artifacts (never participant data in Git)
+.local/
