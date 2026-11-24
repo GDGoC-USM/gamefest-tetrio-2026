@@ -1,0 +1,301 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>GAMEFEST 2026 // TETRIO SHOWDOWN</title>
+  <meta name="description" content="Join the Gamefest TETR.IO Arena. Follow matches, predict winners and climb the leaderboard.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="icon" type="image/png" href="images/gamefest-logo.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+  <!-- HEADER -->
+  <header class="topbar">
+    <div class="header-brand">
+      <a href="index.html" class="partner-logo">
+        <span class="logo-crop"><img src="images/gdgoc-usm.png" alt="Google Developer Groups on Campus USM"></span>
+      </a>
+
+      <span class="logo-divider"></span>
+
+      <a href="index.html" class="gamefest-logo">
+        <span class="logo-crop"><img src="images/gamefest-logo.png" alt="Gamefest logo"></span>
+      </a>
+
+      <span class="brand-caption">GAMEFEST 2026 // TETRIO SHOWDOWN</span>
+    </div>
+
+    <nav class="nav">
+      <a class="active" href="index.html">HOME</a>
+      <a href="matches.html">MATCHES</a>
+      <a href="predict.html">PREDICT</a>
+      <a href="leaderboard.html">LEADERBOARD</a>
+      <a href="admin/">ADMIN</a>
+    </nav>
+
+    <button class="btn sign-in-btn" id="authBtn">
+      SIGN IN WITH GOOGLE
+    </button>
+  </header>
+
+  <main>
+
+    <!-- HERO -->
+    <section class="hero home-hero">
+
+      <div class="hero-content">
+
+        <div class="eyebrow">
+          <span class="live-dot"></span>
+          GAMEFEST 2026 · OFFICIAL TOURNAMENT
+        </div>
+
+        <h1>
+          READY TO STACK
+          <span class="highlight-red">YOUR WAY</span>
+          TO VICTORY?
+        </h1>
+
+        <p class="hero-subtitle">
+          The arena is calling. The competition is heating up.
+          Watch the battles, predict the winners and prove
+          that you know the game.
+        </p>
+
+        <div class="hero-actions">
+          <a href="matches.html" class="btn btn-large">
+            ENTER THE ARENA <span>→</span>
+          </a>
+
+          <a href="predict.html" class="btn secondary btn-large">
+            MAKE YOUR PREDICTION <span>↗</span>
+          </a>
+        </div>
+
+        <p id="welcomeText" class="welcome-text">
+          Sign in with Google to save your predictions and earn points.
+        </p>
+
+      </div>
+
+      <div class="hero-side">
+        <div class="hero-game-card">
+          <div class="game-card-top">
+            <span>GAMEFEST // 2026</span>
+            <span class="game-status">ARENA</span>
+          </div>
+
+          <div class="game-card-center">
+            <span class="game-symbol">T</span>
+            <h2>TETR.IO</h2>
+            <p>THINK FAST. STACK SMART. WIN BIG.</p>
+          </div>
+
+          <div class="game-card-bottom">
+            <span>32 COMPETITORS</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-decoration decoration-one"></div>
+      <div class="hero-decoration decoration-two"></div>
+
+    </section>
+
+    <!-- TOURNAMENT HIGHLIGHTS -->
+    <section class="quick-stats">
+
+      <article class="stat-card">
+        <span class="stat-icon">▦</span>
+        <div>
+          <strong>4</strong>
+          <span>PRELIMINARY ROOMS</span>
+        </div>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-icon">♟</span>
+        <div>
+          <strong>2</strong>
+          <span>SEMI FINAL ROOMS</span>
+        </div>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-icon">⚡</span>
+        <div>
+          <strong>1</strong>
+          <span>GRAND FINAL ROOM</span>
+        </div>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-icon">★</span>
+        <div>
+          <strong>10</strong>
+          <span>POINTS PER CORRECT PREDICT</span>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- TOURNAMENT ROOMS -->
+    <section class="home-section">
+
+      <div class="section-heading">
+        <div>
+          <div class="eyebrow">THE BATTLE STARTS HERE</div>
+          <h2>TOURNAMENT <span class="highlight-red">ARENA</span></h2>
+          <p class="muted">
+            Thirty-two competitors. One unforgettable competition.
+          </p>
+        </div>
+
+        <span class="pill" id="predictionStatus">
+          CHECKING STATUS...
+        </span>
+      </div>
+
+      <section class="grid room-grid" id="roomGrid">
+        <div class="empty">Loading tournament rooms...</div>
+      </section>
+
+      <div class="center-action">
+        <a href="matches.html" class="btn secondary">
+          VIEW ALL MATCHES →
+        </a>
+      </div>
+
+    </section>
+
+    <!-- HOW TO PARTICIPATE -->
+    <section class="home-section participation-section">
+
+      <div class="section-heading">
+        <div>
+          <div class="eyebrow">MORE THAN JUST WATCHING</div>
+          <h2>PLAY ALONG. <span class="highlight-red">EARN POINTS.</span></h2>
+          <p class="muted">
+            Think you can predict the outcome? Put your game knowledge to the test!
+          </p>
+        </div>
+      </div>
+
+      <div class="grid participation-grid">
+
+        <article class="feature-card">
+          <span class="feature-number">01</span>
+          <div class="feature-icon">👀</div>
+          <h3>WATCH THE MATCHES</h3>
+          <p>
+            Follow the tournament schedule and see which competitors
+            are battling for the next round.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">02</span>
+          <div class="feature-icon">🎯</div>
+          <h3>MAKE YOUR PREDICTIONS</h3>
+          <p>
+            Choose who you think will win each match before the
+            organiser closes predictions.
+          </p>
+        </article>
+
+        <article class="feature-card">
+          <span class="feature-number">03</span>
+          <div class="feature-icon">🏆</div>
+          <h3>CLIMB THE LEADERBOARD</h3>
+          <p>
+            Earn 10 points for every correct prediction and get more chance to win <b>LUCKYDRAW</b>.
+          </p>
+        </article>
+
+      </div>
+
+    </section>
+
+    <!-- CALL TO ACTION -->
+    <section class="cta-section">
+
+      <div class="cta-content">
+        <div class="eyebrow">YOUR PREDICTION. YOUR GAME.</div>
+
+        <h2>
+          THINK YOU KNOW
+          <span class="highlight-red">WHO WILL WIN?</span>
+        </h2>
+
+        <p>
+          Don't just watch from the sidelines.
+          Join the prediction challenge.
+        </p>
+
+        <a href="predict.html" class="btn btn-large">
+          MAKE YOUR MOVE →
+        </a>
+      </div>
+
+      <div class="cta-decoration">GAME ON.</div>
+
+    </section>
+
+    <!-- LEADERBOARD PROMOTION -->
+    <section class="leaderboard-promo">
+
+      <div>
+        <div class="eyebrow">THE COMPETITION DOESN'T STOP</div>
+        <h2>WHO'S ON <span class="highlight-red">TOP?</span></h2>
+        <p class="muted">
+          Every correct pick brings you closer to the top for more <b>LUCKYDRAW</b> chances.
+          Check your ranking and see how you compare.
+        </p>
+      </div>
+
+      <a href="leaderboard.html" class="btn">
+        VIEW LEADERBOARD →
+      </a>
+
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+
+    <div class="footer-brand">
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="images/gdgoc-usm.png" alt="GDGoC USM"></span></span>
+      <span class="footer-divider"></span>
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="images/gamefest-logo.png" alt="Gamefest"></span></span>
+    </div>
+
+    <p>GAMEFEST 2026 // TETRIO SHOWDOWN</p>
+
+    <p class="footer-small">
+      Powered by Google Developer Groups on Campus USM
+    </p>
+
+  </footer>
+
+  <!-- MOBILE NAVIGATION -->
+  <nav class="bottom-nav">
+    <a class="active" href="index.html"><b>⌂</b>Home</a>
+    <a href="matches.html"><b>▦</b>Matches</a>
+    <a href="predict.html"><b>◎</b>Predict</a>
+    <a href="leaderboard.html"><b>♛</b>Ranking</a>
+  </nav>
+
+  <script type="module" src="js/home.js"></script>
+
+</body>
+</html>

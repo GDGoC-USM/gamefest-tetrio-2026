@@ -1,0 +1,354 @@
+
+/* ==========================================
+   LUCKY DRAW
+========================================== */
+
+.luckydraw-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.luckydraw-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 18px;
+}
+
+.luckydraw-stat span {
+  color: var(--admin-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.luckydraw-stat strong {
+  color: #d5b0ff;
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 34px;
+}
+
+/* MAIN WHEEL CARD */
+
+.luckydraw-main {
+  text-align: center;
+  overflow: hidden;
+}
+
+.luckydraw-heading {
+  margin-bottom: 28px;
+}
+
+.luckydraw-heading h3 {
+  margin: 8px 0;
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 32px;
+  letter-spacing: .08em;
+}
+
+.luckydraw-heading p {
+  color: var(--admin-muted);
+  font-size: 13px;
+}
+
+/* WHEEL */
+
+.luckydraw-wheel-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 20px auto 30px;
+}
+
+.luckydraw-pointer {
+  position: relative;
+  z-index: 3;
+  margin-bottom: -17px;
+  color: #ff527b;
+  font-size: 35px;
+  filter: drop-shadow(0 3px 5px #000);
+}
+
+.luckydraw-wheel {
+  position: relative;
+  width: min(340px, 75vw);
+  aspect-ratio: 1;
+  border: 9px solid #d4b1ff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 5px #33234e,
+    0 0 35px #8a4bd855,
+    inset 0 0 20px #0008;
+  transition: transform 5.2s cubic-bezier(.12,.78,.16,1);
+}
+
+
+/* ==========================================
+   PARTICIPANT NAMES ON WHEEL
+========================================== */
+
+.ld-wheel-label {
+  position: absolute;
+  z-index: 1;
+
+  top: 50%;
+  left: 50%;
+
+  width: 76px;
+
+  color: #ffffff;
+
+  font-family: "Barlow Condensed", sans-serif;
+
+  font-size: 10px;
+  font-weight: 900;
+
+  text-align: center;
+  text-transform: uppercase;
+
+  line-height: 1.1;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  text-shadow:
+    1px 1px 3px #000000,
+    -1px -1px 3px #000000;
+
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Keep the centre of the wheel above the names. */
+
+.luckydraw-wheel-center {
+  z-index: 2;
+}
+
+.luckydraw-wheel-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100px;
+  height: 100px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #17142b;
+  border: 5px solid #d4b1ff;
+  border-radius: 50%;
+  box-shadow: 0 4px 18px #0008;
+}
+
+.luckydraw-wheel-center span {
+  color: #c8a5ff;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .1em;
+}
+
+.luckydraw-wheel-center strong {
+  color: #fff;
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 22px;
+}
+
+/* WINNER DISPLAY */
+
+.luckydraw-winner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 20px auto;
+  padding: 22px;
+  background: #17142b;
+  border: 1px solid #a66be866;
+  border-radius: 12px;
+}
+
+.luckydraw-winner span {
+  color: #c6a1ff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .14em;
+}
+
+.luckydraw-winner strong {
+  color: #fff;
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: clamp(25px, 5vw, 38px);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.luckydraw-winner small {
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+/* ACTION BUTTONS */
+
+.luckydraw-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.luckydraw-actions button {
+  min-width: 190px;
+}
+
+#ldSpinBtn {
+  background: linear-gradient(110deg, #8a4bd8, #d94c70);
+  border: none;
+}
+
+#ldSpinBtn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+#ldRefreshBtn:disabled {
+  opacity: .5;
+  cursor: wait;
+}
+
+/* PARTICIPANTS */
+
+.luckydraw-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.luckydraw-section-title h3 {
+  margin: 0;
+}
+
+.luckydraw-section-title > span {
+  color: var(--admin-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+
+.ld-participant-row {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.ld-participant-info {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.ld-participant-info strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.ld-participant-info span {
+  color: #c6a1ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ld-progress {
+  height: 7px;
+  overflow: hidden;
+  background: #ffffff12;
+  border-radius: 20px;
+}
+
+.ld-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8a4bd8, #d94c70);
+  border-radius: 20px;
+}
+
+/* WINNER HISTORY */
+
+.ld-history-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.ld-history-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 50%;
+  background: #8a4bd833;
+  color: #d5b0ff;
+  font-weight: 900;
+}
+
+.ld-history-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ld-history-info strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.ld-history-info span {
+  color: var(--admin-muted);
+  font-size: 10px;
+}
+
+.ld-history-ticket {
+  color: #c6a1ff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* MOBILE */
+
+@media (max-width: 700px) {
+
+  .luckydraw-stats {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .luckydraw-actions {
+    flex-direction: column;
+  }
+
+  .luckydraw-actions button {
+    width: 100%;
+  }
+
+  .luckydraw-section-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ld-history-row {
+    gap: 9px;
+  }
+
+}

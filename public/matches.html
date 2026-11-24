@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Matches & Results | Gamefest</title>
+
+  <link rel="icon" type="image/png" href="images/gamefest-logo.png">
+  <link rel="stylesheet" href="css/style.css">
+
+  <style>
+    .room-public-players { margin: 18px 0; }
+    .room-public-players h3 {
+      margin-bottom: 12px;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 24px;
+      text-transform: uppercase;
+    }
+    .room-player-list {
+      display: grid;
+      gap: 8px;
+      margin: 16px 0;
+    }
+    .room-player {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,.025);
+    }
+    .room-player span {
+      flex: 0 0 auto;
+      color: #8987a5;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 1px;
+    }
+    .room-player strong {
+      overflow-wrap: anywhere;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 18px;
+      text-transform: uppercase;
+    }
+    .room-result {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+  </style>
+</head>
+
+<body class="matches-page">
+
+  <!-- HEADER -->
+  <header class="topbar">
+
+    <div class="header-brand">
+      <a href="index.html" class="partner-logo">
+        <span class="logo-crop"><img src="images/gdgoc-usm.png"
+             alt="Google Developer Groups on Campus USM"></span>
+      </a>
+
+      <span class="logo-divider"></span>
+
+      <a href="index.html" class="gamefest-logo">
+        <span class="logo-crop"><img src="images/gamefest-logo.png" alt="Gamefest logo"></span>
+      </a>
+
+      <span class="brand-caption">
+        GAMEFEST 2026 // TETRIO SHOWDOWN
+      </span>
+    </div>
+
+    <nav class="nav">
+      <a href="index.html">HOME</a>
+      <a class="active" href="matches.html">MATCHES</a>
+      <a href="predict.html">PREDICT</a>
+      <a href="leaderboard.html">LEADERBOARD</a>
+      <a href="admin/">ADMIN</a>
+    </nav>
+  </header>
+
+  <main class="matches-main">
+
+    <!-- HERO -->
+    <section class="matches-hero">
+      <div class="matches-hero-content">
+        <div class="eyebrow">
+          <span class="live-dot"></span>
+          GAMEFEST TOURNAMENT TRACKER
+        </div>
+
+        <h1>
+          THE ROAD<br>
+          <span>TO VICTORY.</span>
+        </h1>
+
+        <p>
+          Every room matters. Follow the players, track published results
+          and see who makes it to the Grand Final.
+        </p>
+
+        <a href="#all-matches" class="btn matches-hero-btn">
+          EXPLORE ROOMS <span>→</span>
+        </a>
+      </div>
+
+      <div class="matches-hero-side">
+        <div class="hero-stat-card">
+          <span class="hero-stat-label">TOURNAMENT</span>
+          <strong>2026</strong>
+          <span class="hero-stat-caption">GAMEFEST // TETR.IO</span>
+        </div>
+
+        <div class="hero-decoration">
+          <span class="deco-block block-one"></span>
+          <span class="deco-block block-two"></span>
+          <span class="deco-block block-three"></span>
+          <span class="deco-block block-four"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TOURNAMENT STATUS -->
+    <section class="matches-overview">
+      <div class="matches-overview-heading">
+        <div>
+          <div class="eyebrow">TOURNAMENT STATUS</div>
+          <h2>THE ROOM BOARD</h2>
+        </div>
+
+        <span class="matches-live-label">
+          <span class="live-dot"></span> FIREBASE LIVE DATA
+        </span>
+      </div>
+
+      <div class="matches-stats">
+        <div class="matches-stat">
+          <span>TOTAL ROOMS</span>
+          <strong id="totalMatches">—</strong>
+        </div>
+
+        <div class="matches-stat">
+          <span>ROOMS LIVE</span>
+          <strong id="liveMatches">—</strong>
+        </div>
+
+        <div class="matches-stat">
+          <span>ROOMS UPCOMING</span>
+          <strong id="upcomingMatches">—</strong>
+        </div>
+
+        <div class="matches-stat">
+          <span>ROOMS COMPLETED</span>
+          <strong id="completedMatches">—</strong>
+        </div>
+      </div>
+    </section>
+
+    <!-- ALL ROOMS -->
+    <section class="all-matches-section" id="all-matches">
+
+      <div class="matches-section-heading">
+        <div>
+          <div class="eyebrow">FOLLOW THE COMPETITION</div>
+          <h2>ALL ROOMS & RESULTS</h2>
+          <p>Choose a room status to narrow down the tournament.</p>
+        </div>
+      </div>
+
+      <div class="matches-filters" id="matchFilters">
+        <button class="match-filter active" data-filter="all">
+          ALL ROOMS
+        </button>
+
+        <button class="match-filter" data-filter="live">
+          <span class="live-dot"></span> LIVE
+        </button>
+
+        <button class="match-filter" data-filter="upcoming">
+          UPCOMING
+        </button>
+
+        <button class="match-filter" data-filter="completed">
+          ROOMS COMPLETED
+        </button>
+      </div>
+
+      <div id="matchList">
+        <div class="empty">Loading tournament rooms...</div>
+      </div>
+
+    </section>
+
+    <!-- PREDICTION CTA -->
+    <section class="matches-bottom-banner">
+      <div>
+        <div class="eyebrow">YOUR NEXT MOVE</div>
+        <h2>THINK YOU KNOW<br>WHO WILL WIN?</h2>
+        <p>Try the predictions.</p>
+      </div>
+
+      <a href="predict.html" class="btn matches-predict-btn">
+        MAKE YOUR PREDICTIONS →
+      </a>
+    </section>
+
+  </main>
+
+  <!-- BOTTOM NAVIGATION -->
+  <nav class="bottom-nav">
+    <a href="index.html"><b>⌂</b>Home</a>
+    <a class="active" href="matches.html"><b>▦</b>Matches</a>
+    <a href="predict.html"><b>◎</b>Predict</a>
+    <a href="leaderboard.html"><b>♛</b>Ranking</a>
+  </nav>
+
+  <script type="module" src="js/matches.js"></script>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+
+    <div class="footer-brand">
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="images/gdgoc-usm.png" alt="GDGoC USM"></span></span>
+      <span class="footer-divider"></span>
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="images/gamefest-logo.png" alt="Gamefest"></span></span>
+    </div>
+
+    <p>GAMEFEST 2026 // TETRIO SHOWDOWN</p>
+
+    <p class="footer-small">
+      Powered by Google Developer Groups on Campus USM
+    </p>
+
+  </footer>
+
+</body>
+</html>

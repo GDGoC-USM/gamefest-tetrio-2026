@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Gamefest Admin | Tournament Control</title>
+
+  <link rel="icon" type="image/png" href="../images/gamefest-logo.png">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/admin.css">
+  <link rel="stylesheet" href="../css/luckydraw.css">
+
+  <style>
+    .rooms-container {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .room-overview-card { min-width: 0; }
+    .room-player-list {
+      display: grid;
+      gap: 7px;
+      margin: 16px 0;
+    }
+    .room-player {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      border: 1px solid var(--admin-line);
+      border-radius: 8px;
+      background: #ffffff04;
+    }
+    .room-player span {
+      flex: 0 0 auto;
+      color: var(--admin-muted);
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 1px;
+    }
+    .room-player strong {
+      overflow-wrap: anywhere;
+      color: #fff;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 18px;
+      text-transform: uppercase;
+    }
+    .room-result {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--admin-line);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    #roomEditorCard {
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid var(--admin-line);
+    }
+    @media (max-width: 700px) {
+      .rooms-container { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body class="admin-page">
+
+  <header class="topbar">
+    <div class="header-brand">
+      <a href="../index.html" class="partner-logo">
+        <span class="logo-crop"><img src="../images/gdgoc-usm.png"
+             alt="Google Developer Groups on Campus USM"></span>
+      </a>
+
+      <span class="logo-divider"></span>
+
+      <a href="../index.html" class="gamefest-logo">
+        <span class="logo-crop"><img src="../images/gamefest-logo.png" alt="Gamefest logo"></span>
+      </a>
+
+      <span class="brand-caption">GAMEFEST 2026 // TETRIO SHOWDOWN</span>
+    </div>
+
+    <nav class="nav">
+      <a href="../index.html">HOME</a>
+      <a href="../matches.html">MATCHES</a>
+      <a href="../predict.html">PREDICT</a>
+      <a href="../leaderboard.html">LEADERBOARD</a>
+      <a class="active" href="index.html">ADMIN</a>
+    </nav>
+
+    <button class="btn sign-in-btn" id="authBtn">
+      SIGN IN WITH GOOGLE
+    </button>
+  </header>
+
+  <main class="admin-main">
+
+    <!-- ADMIN LOGIN -->
+    <section id="adminLogin" class="admin-card login-card">
+      <div class="admin-section-heading">
+        <span class="eyebrow">GAMEFEST ADMINISTRATION</span>
+        <h2>Welcome back.</h2>
+        <p>Sign in using your authorised administrator account.</p>
+      </div>
+
+      <div class="field">
+        <label for="adminEmail">Email address</label>
+        <input
+          type="email"
+          id="adminEmail"
+          placeholder="Enter admin email"
+          autocomplete="username"
+          required
+        >
+      </div>
+
+      <div class="field">
+        <label for="adminPassword">Password</label>
+        <input
+          type="password"
+          id="adminPassword"
+          placeholder="Enter admin password"
+          autocomplete="current-password"
+          required
+        >
+      </div>
+
+      <button type="button" class="btn primary" id="loginBtn">
+        Sign in to dashboard
+      </button>
+
+      <p id="adminMessage" class="admin-message"
+         role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- ADMIN DASHBOARD -->
+    <div id="adminContent" hidden>
+
+      <div class="dashboard-heading">
+        <div>
+          <span class="eyebrow">◈ TOURNAMENT MANAGEMENT</span>
+          <h2>Admin Dashboard</h2>
+          <p>Manage rooms, matches and audience predictions.</p>
+        </div>
+
+        <span class="admin-live-label">
+          <span class="live-dot"></span>
+          CONTROL PANEL
+        </span>
+      </div>
+
+      <!-- NAVIGATION -->
+      <nav class="admin-nav" aria-label="Admin navigation">
+        <button type="button" class="nav-btn active"
+                data-section="overview">
+          Overview
+        </button>
+
+        <button type="button" class="nav-btn"
+                data-section="rooms">
+          Rooms
+        </button>
+
+        <button type="button" class="nav-btn"
+                data-section="matches">
+          Matches
+        </button>
+
+        <button type="button" class="nav-btn"
+                data-section="settings">
+          Prediction Settings
+        </button>
+
+        <button type="button" class="nav-btn"
+                data-section="luckydraw">
+          🎡 Lucky Draw
+        </button>
+      </nav>
+
+      <p id="dashboardMessage"
+         class="admin-message"
+         role="status"
+         aria-live="polite"></p>
+
+      <!-- OVERVIEW -->
+      <section id="overview" class="admin-section">
+        <div class="admin-section-heading">
+          <h2>Tournament Overview</h2>
+          <p>Review the competition format and tournament structure.</p>
+        </div>
+
+        <div class="admin-card">
+          <h3>Tournament Format</h3>
+
+          <div class="format-list">
+            <div class="format-item">
+              <span class="format-number">01</span>
+              <div>
+                <strong>Preliminary Round</strong>
+                <p>4 rooms with 8 players per room.</p>
+              </div>
+            </div>
+
+            <div class="format-item">
+              <span class="format-number">02</span>
+              <div>
+                <strong>Semi-finals</strong>
+                <p>2 rooms with 4 qualified players per room.</p>
+              </div>
+            </div>
+
+            <div class="format-item">
+              <span class="format-number">03</span>
+              <div>
+                <strong>Grand Final</strong>
+                <p>4 finalists compete for the championship.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="format-note">
+            <strong>Qualification rules</strong>
+            <ul>
+              <li>Top 2 players from each preliminary room advance.</li>
+              <li>Top 2 players from each semi-final advance to the final.</li>
+              <li>Each correct prediction earns 10 points and 1 lucky draw ticket.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ROOM MANAGEMENT -->
+      <section id="rooms" class="admin-section" hidden>
+        <div class="admin-section-heading">
+          <h2>Room Management</h2>
+          <p>View all rooms, assigned players, room status and published official results.</p>
+        </div>
+
+        <div id="roomsContainer" class="rooms-container"></div>
+
+        <div class="admin-card">
+          <h3>Generate Semi-finals</h3>
+          <p>
+            Room A and B qualifiers will enter SF1.
+            Room C and D qualifiers will enter SF2.
+          </p>
+
+          <button type="button" class="btn primary"
+                  id="generateSemifinalsBtn">
+            Generate Semi-finals
+          </button>
+        </div>
+
+        <div class="admin-card">
+          <h3>Generate Grand Final</h3>
+          <p>
+            The top 2 players from SF1 and SF2 will enter the Grand Final.
+          </p>
+
+          <button type="button" class="btn primary"
+                  id="generateFinalBtn">
+            Generate Grand Final
+          </button>
+        </div>
+      </section>
+
+      <!-- MATCHES MANAGEMENT -->
+      <section id="matches" class="admin-section" hidden>
+        <div class="admin-section-heading">
+          <h2>Matches Management</h2>
+          <p>Select a tournament stage and room to enter players, update room status, and publish official results.</p>
+        </div>
+
+        <div class="admin-card">
+          <h3>Room Control</h3>
+
+          <div class="field">
+            <label for="room">Tournament stage / room</label>
+            <select id="room">
+              <option value="">Select stage / room</option>
+            </select>
+          </div>
+
+          <div id="roomEditorCard" hidden>
+            <h3 id="roomFormTitle">Manage Room</h3>
+
+            <div class="field">
+              <label for="roomPlayers">Player names (one per line)</label>
+              <textarea id="roomPlayers" rows="8"
+                placeholder="Enter one player name per line"></textarea>
+            </div>
+
+            <div class="field">
+              <label for="roomStatus">Room status</label>
+              <select id="roomStatus">
+                <option value="upcoming">Upcoming</option>
+                <option value="live">Live</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+
+            <div id="roomResultFields"></div>
+
+            <div class="form-actions">
+              <button type="button" class="btn primary"
+                      id="saveRoomBtn">
+                Save Room
+              </button>
+
+              <button type="button" class="btn primary"
+                      id="publishRoomBtn">
+                Publish Results
+              </button>
+
+              <button type="button" class="btn red"
+                      id="unpublishRoomBtn" hidden>
+                Unpublish Results / Reopen Room
+              </button>
+
+              <button type="button" class="btn secondary"
+                      id="cancelRoomBtn">
+                Cancel
+              </button>
+            </div>
+
+            <p class="muted">
+              Preliminary rooms require 8 players. Semi-finals and Grand Final require 4 players.
+            </p>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <h3>Room Summary</h3>
+          <div id="matchesContainer" class="matches-container"></div>
+        </div>
+      </section>
+
+      <!-- PREDICTION SETTINGS -->
+      <section id="settings" class="admin-section" hidden>
+        <div class="admin-section-heading">
+          <h2>Prediction Settings</h2>
+          <p>Open or close audience predictions for each tournament stage.</p>
+        </div>
+
+        <div class="admin-card">
+          <div id="stagePredictionControls"></div>
+        </div>
+      </section>
+
+
+      <!-- ==========================================
+          LUCKY DRAW
+      ========================================== -->
+
+      <section id="luckydraw" class="admin-section" hidden>
+
+        <div class="admin-section-heading">
+          <h2>Lucky Draw</h2>
+          <p>
+            Spin the wheel to select a winner based on the
+            latest leaderboard tickets.
+          </p>
+        </div>
+
+        <div class="luckydraw-stats">
+
+          <div class="admin-card luckydraw-stat">
+            <span>ELIGIBLE PARTICIPANTS</span>
+            <strong id="ldParticipants">0</strong>
+          </div>
+
+          <div class="admin-card luckydraw-stat">
+            <span>TOTAL TICKETS</span>
+            <strong id="ldTickets">0</strong>
+          </div>
+
+          <div class="admin-card luckydraw-stat">
+            <span>PREVIOUS WINNERS</span>
+            <strong id="ldWinners">0</strong>
+          </div>
+
+        </div>
+
+        <div class="admin-card luckydraw-main">
+
+          <div class="luckydraw-heading">
+            <span class="eyebrow">GAMEFEST 2026</span>
+            <h3>THE LUCKY WHEEL</h3>
+            <p>
+              Every ticket gives one chance to win.
+            </p>
+          </div>
+
+          <div class="luckydraw-wheel-area">
+
+            <div class="luckydraw-pointer">▼</div>
+
+            <div id="ldWheel" class="luckydraw-wheel">
+              <div class="luckydraw-wheel-center">
+                <span>GAMEFEST</span>
+                <strong>SPIN</strong>
+              </div>
+            </div>
+
+          </div>
+
+          <div id="ldWinner" class="luckydraw-winner">
+            <span>WAITING FOR THE DRAW</span>
+            <strong>GOOD LUCK!</strong>
+          </div>
+
+          <div class="luckydraw-actions">
+
+            <button
+              type="button"
+              class="btn primary"
+              id="ldSpinBtn"
+              disabled
+            >
+              🎡 SPIN THE WHEEL
+            </button>
+
+            <button
+              type="button"
+              class="btn secondary"
+              id="ldRefreshBtn"
+            >
+              ↻ REFRESH LATEST TICKETS
+            </button>
+
+          </div>
+
+          <p id="ldMessage" class="admin-message"
+            role="status" aria-live="polite"></p>
+
+        </div>
+
+        <div class="admin-card">
+
+          <div class="luckydraw-section-title">
+            <h3>Eligible Participants</h3>
+            <span>LIVE TICKET DISTRIBUTION</span>
+          </div>
+
+          <div id="ldParticipantsList">
+            <p class="muted">Loading participants...</p>
+          </div>
+
+        </div>
+
+        <div class="admin-card">
+
+          <div class="luckydraw-section-title">
+            <h3>Winner History</h3>
+            <span>PREVIOUS WINNERS</span>
+          </div>
+
+          <div id="ldHistory">
+            <p class="muted">No winners yet.</p>
+          </div>
+
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-brand">
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="../images/gdgoc-usm.png" alt="GDGoC USM"></span></span>
+      <span class="footer-divider"></span>
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="../images/gamefest-logo.png" alt="Gamefest"></span></span>
+    </div>
+
+    <p>GAMEFEST 2026 // TETRIO SHOWDOWN</p>
+
+    <p class="footer-small">
+      Powered by Google Developer Groups on Campus USM
+    </p>
+
+  </footer>
+
+  <script type="module" src="../js/admin.js"></script>
+  <script type="module" src="../js/luckydraw.js"></script>
+
+</body>
+</html>

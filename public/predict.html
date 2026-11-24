@@ -1,0 +1,293 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Predict | GAMEFEST 2026</title>
+
+  <meta name="description"
+    content="Predict qualifiers and final placements in the Gamefest 2026 TETR.IO Showdown.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+
+  <link rel="icon" type="image/png" href="images/gamefest-logo.png">
+  <link rel="stylesheet" href="css/style.css">
+
+  <style>
+    .room-public-players {
+      margin: 18px 0;
+    }
+
+    .room-public-players h3 {
+      margin-bottom: 12px;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 24px;
+      text-transform: uppercase;
+    }
+
+    .room-player-list {
+      display: grid;
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    .room-player {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,.025);
+    }
+
+    .room-player span {
+      flex: 0 0 auto;
+      color: #8987a5;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 1px;
+    }
+
+    .room-player strong {
+      overflow-wrap: anywhere;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 18px;
+      text-transform: uppercase;
+    }
+
+    .room-result {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .room-prediction-players {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    .room-prediction-players .prediction-player {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      text-align: left;
+      gap: 5px;
+      min-height: 64px;
+    }
+
+    .room-prediction-players .prediction-player span {
+      font-size: 9px;
+      letter-spacing: 1px;
+      opacity: .7;
+    }
+
+    .room-prediction-players .prediction-player strong {
+      font-size: 17px;
+      overflow-wrap: anywhere;
+    }
+
+    .final-prediction-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 18px 0;
+    }
+
+    @media (max-width: 650px) {
+      .room-prediction-players,
+      .final-prediction-fields {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- HEADER -->
+  <header class="topbar">
+
+    <div class="header-brand">
+
+      <a href="index.html" class="partner-logo">
+        <span class="logo-crop"><img src="images/gdgoc-usm.png" alt="GDGoC USM"></span>
+      </a>
+
+      <span class="logo-divider"></span>
+
+      <a href="index.html" class="gamefest-logo">
+        <span class="logo-crop"><img src="images/gamefest-logo.png" alt="Gamefest"></span>
+      </a>
+
+      <span class="brand-caption">
+        GAMEFEST 2026 // TETRIO SHOWDOWN
+      </span>
+
+    </div>
+
+    <nav class="nav">
+      <a href="index.html">HOME</a>
+      <a href="matches.html">MATCHES</a>
+      <a class="active" href="predict.html">PREDICT</a>
+      <a href="leaderboard.html">LEADERBOARD</a>
+      <a href="admin/">ADMIN</a>
+    </nav>
+
+  </header>
+
+  <main>
+
+    <!-- PAGE INTRO -->
+    <section class="home-section">
+
+      <div class="eyebrow">
+        THE AUDIENCE CHALLENGE
+      </div>
+
+      <h1>
+        MAKE YOUR
+        <span class="highlight-red">MOVE.</span>
+      </h1>
+
+      <p class="muted">
+        Predict the qualifiers and final placements.
+        Your predictions are saved to your account in Firebase.
+      </p>
+
+      <div class="quick-stats">
+
+        <article class="stat-card">
+          <span class="stat-icon">🎯</span>
+          <div>
+            <strong>2</strong>
+            <span>TOP 2 PER ROOM</span>
+          </div>
+        </article>
+
+        <article class="stat-card">
+          <span class="stat-icon">⚡</span>
+          <div>
+            <strong>10</strong>
+            <span>POINTS PER CORRECT PICK</span>
+          </div>
+        </article>
+
+        <article class="stat-card">
+          <span class="stat-icon">🏆</span>
+          <div>
+            <strong>∞</strong>
+            <span>CHANCES TO CLIMB</span>
+          </div>
+        </article>
+
+      </div>
+
+    </section>
+
+    <!-- PREDICTION AREA -->
+    <section class="home-section">
+
+      <div class="section-heading">
+        <div>
+          <div class="eyebrow">TRUST YOUR INSTINCTS</div>
+
+          <h2>
+            PREDICTION
+            <span class="highlight-red">ARENA</span>
+          </h2>
+
+          <p class="muted">
+            Select <b>TOP 2 PLAYERS</b> in each <b>PRELIMINARY</b> and <b>SEMI FINAL</b> room,
+            then choose the <b>CHAMPION</b> and <b>RUNNER-UPs</b> in the <b>GRAND FINAL</b>.
+          </p>
+        </div>
+      </div>
+
+      <div class="prediction-auth-row">
+        <p class="muted"><b>Google sign-in is required before submitting predictions.</b></p>
+        <button type="button" id="authBtn" class="btn secondary">SIGN IN WITH GOOGLE</button>
+      </div>
+
+      <section id="predictionList" class="prediction-grid">
+        <div class="empty">
+          Loading tournament rooms...
+        </div>
+      </section>
+
+    </section>
+
+    <!-- REMINDER -->
+    <section class="cta-section">
+
+      <div class="cta-content">
+
+        <div class="eyebrow">
+          EVERY PICK COUNTS
+        </div>
+
+        <h2>
+          PLAY SMART.
+          <span class="highlight-red">SCORE BIG.</span>
+        </h2>
+
+        <p>
+          Sign in to submit predictions.
+          Your submitted selections are linked to your account and remain available when you return.
+        </p>
+
+        <a href="leaderboard.html" class="btn btn-large">
+          CHECK LEADERBOARD →
+        </a>
+
+      </div>
+
+      <div class="cta-decoration">
+        GAME ON.
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+
+    <div class="footer-brand">
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="images/gdgoc-usm.png" alt="GDGoC USM"></span></span>
+      <span class="footer-divider"></span>
+      <span class="footer-logo-slot"><span class="logo-crop"><img src="images/gamefest-logo.png" alt="Gamefest"></span></span>
+    </div>
+
+    <p>GAMEFEST 2026 // TETRIO SHOWDOWN</p>
+
+    <p class="footer-small">
+      Powered by Google Developer Groups on Campus USM
+    </p>
+
+  </footer>
+
+  <!-- MOBILE NAVIGATION -->
+  <nav class="bottom-nav">
+    <a href="index.html"><b>⌂</b>Home</a>
+    <a href="matches.html"><b>▦</b>Matches</a>
+    <a class="active" href="predict.html"><b>◎</b>Predict</a>
+    <a href="leaderboard.html"><b>♛</b>Ranking</a>
+  </nav>
+
+  <script type="module" src="js/predict.js"></script>
+
+</body>
+</html>

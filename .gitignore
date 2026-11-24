@@ -1,0 +1,12 @@
+# Firebase local state and debug logs
+.firebase/
+*-debug.log
+*-debug.log.*
+
+# Local dependencies
+node_modules/
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
