@@ -104,6 +104,26 @@ There is no hardcoded administrator password.
 
 The supplied Firestore rules restrict administrative writes and prevent browser clients from granting themselves admin roles. Hiding the dashboard alone is not a security boundary; deploy the rules to the selected project.
 
+### Import a participant roster
+
+After initializing the tournament, open **Admin → Rooms → Import roster CSV**. Export an Excel or Google Sheets list as UTF-8 CSV with this exact header and column order:
+
+```csv
+room,participantId,username
+A,TEST001,ExampleOne
+B,TEST002,ExampleTwo
+```
+
+Choose the file and select **Preview CSV**. Review all assignments, empty-slot counts, changed groups and dependent-room resets, then select **Save imported roster** and confirm. Previewing does not write to Firestore. No CLI import, service-account credential or project configuration change is needed.
+
+- Only groups A–D are accepted, with at most eight participants per group. All three fields are required. Duplicate participant IDs and usernames are rejected case-insensitively, including collisions with groups omitted from the CSV.
+- Each listed group's entire roster is replaced in file order; unused slots become empty. Omitted groups are unchanged. Participant IDs remain text, preserving leading zeros. Quoted CSV fields, UTF-8 BOMs and Windows line endings are supported.
+- Matching existing participant IDs retain immutable player keys, even when a username changes. Legacy players without IDs can be matched by username. To move an existing participant between groups or reuse a username with a different ID, clear the old slot in the dashboard first.
+- Published groups must be explicitly reopened before their rosters can change. Saving changed rosters resets dependent rooms and deletes their predictions, but retains predictions for the imported groups, just like manual roster edits. Recalculation follows the save.
+- If rooms change after preview, preview the CSV again. An identical import has nothing to save.
+
+Keep real participant CSVs outside the repository, or in the ignored `.local/` directory. Test imports using synthetic data and the local emulators, never the live event database.
+
 ### Run locally
 
 Use the isolated demo project; no live backend access is needed:
@@ -187,7 +207,7 @@ Availability depends on the repository's visibility and GitHub plan. Until prote
 
 ## Verification before a PR
 
-Run `node --test tests/tournament.test.mjs` for isolated tournament, scoring, validation, and dependency regression scenarios. These checks do not contact Firebase. Then test the affected flow in a browser and report exactly what you checked:
+Run `node --test tests/tournament.test.mjs tests/roster-import.test.mjs` for isolated tournament, scoring, validation, dependency and CSV import regression scenarios. These checks do not contact Firebase. Then test the affected flow in a browser and report exactly what you checked:
 
 - Public page changes: navigation, desktop/mobile layout, loading states, and console errors.
 - Authentication/predictions: signed-out and signed-in behavior, saving/resetting picks, and closed stages.

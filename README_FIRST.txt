@@ -96,6 +96,13 @@ G. ADMINISTRATOR FEATURES
 - Enter the participant roster in the admin dashboard, never in committed files.
   Keep existing string player keys stable. Store the participant ID separately as
   text (preserving leading zeroes) and the username separately, trimmed.
+  Bulk entry: Admin > Rooms > Import roster CSV accepts the exact header
+  room,participantId,username and up to eight rows per group A-D. Preview first,
+  then explicitly save and confirm. Listed group rosters are replaced in file
+  order; spare slots stay blank and omitted groups stay unchanged. Duplicate IDs
+  or usernames are rejected. Existing IDs retain their player keys. Saving resets
+  dependent rooms and deletes their predictions, while retaining group picks.
+  Reopen published groups before roster changes. Keep real CSVs out of Git.
 - Groups allow unfilled slots; a real player needs a nonempty key, not TBD.
 - Publish each group's two qualifiers in first/second order, not roster order.
 - Publish valid FT scores for each series. Confirmed results populate the exact
