@@ -165,7 +165,7 @@ function baseRoom(config) {
   return {
     name: config.name, stage: config.stage, stageId: config.stage,
     formatVersion: 2, players: Array(config.size).fill(""), playerDetails: {},
-    status: "upcoming", resultsPublished: false
+    status: "upcoming", resultsPublished: false, predictionsLocked: false
   };
 }
 
@@ -194,8 +194,28 @@ function renderRooms() {
         `<div class="room-player"><span>${index + 1}</span><strong>${escapeHTML(playerLabel(room, room.players?.[index] || ""))}</strong></div>`
       ).join("")}</div>
       <div class="room-result">${escapeHTML(resultText(config, room))}</div>
+      ${config.kind !== "ffa" ? `<p class="muted">Room prediction lock: <strong>${room.predictionsLocked === true ? "LOCKED" : "UNLOCKED"}</strong></p>
+      <button type="button" class="btn ${room.predictionsLocked === true ? "secondary" : "red"} room-prediction-toggle"
+        data-room="${config.id}" data-locked="${room.predictionsLocked === true}"
+        aria-label="${room.predictionsLocked === true ? "Unlock" : "Lock"} predictions for ${escapeHTML(config.name)}"
+        ${!roomsCache[config.id] ? "disabled" : ""}>${room.predictionsLocked === true ? "Unlock" : "Lock"} predictions</button>` : ""}
     </article>`;
   }).join("");
+  $("roomsContainer").querySelectorAll(".room-prediction-toggle").forEach(button => {
+    button.addEventListener("click", () => persist(async () => {
+      const id = button.dataset.room;
+      const locked = button.dataset.locked !== "true";
+      const reference = doc(db, "rooms", id);
+      const snapshot = await getDoc(reference);
+      if (!snapshot.exists()) throw new Error("Initialize the tournament before changing a room lock.");
+      await setDoc(reference, {
+        predictionsLocked: locked, updatedAt: serverTimestamp()
+      }, { merge: true });
+      await fetchRooms();
+      renderRooms();
+      notify(`${configFor(id).name}: predictions ${locked ? "locked" : "unlocked"}. Saved picks are retained. Stage and result restrictions still apply.`, "success");
+    }));
+  });
   const current = $("room").value;
   $("room").innerHTML = '<option value="">Select stage / room</option>' +
     ROOM_CONFIG.map(config =>
@@ -400,7 +420,9 @@ async function writeRoomChanges(sources, resetIds) {
   const derived = deriveRooms(working);
   const updates = new Map(sources);
   resetIds.forEach(dependentId => {
-    updates.set(dependentId, derived[dependentId]);
+    updates.set(dependentId, {
+      ...derived[dependentId], predictionsLocked: working[dependentId].predictionsLocked === true
+    });
   });
   // Metadata changes also reach unchanged feeder rosters without overwriting their results.
   for (const [dependentId, expected] of Object.entries(derived)) {
@@ -607,7 +629,7 @@ $("initializeTournamentBtn").addEventListener("click", () => persist(async () =>
     }
   }
   resetIds.forEach(id => {
-    working[id] = emptyResult(baseRoom(configFor(id)));
+    working[id] = { ...baseRoom(configFor(id)), predictionsLocked: roomsCache[id]?.predictionsLocked === true };
   });
   const derived = deriveRooms(working);
   // An explicit migration also repairs feeder drift, resetting all affected descendants.
@@ -617,9 +639,13 @@ $("initializeTournamentBtn").addEventListener("click", () => persist(async () =>
       dependentRoomIds(config.id).forEach(id => resetIds.add(id));
     }
   }
-  resetIds.forEach(id => { working[id] = emptyResult(baseRoom(configFor(id))); });
+  resetIds.forEach(id => {
+    working[id] = { ...baseRoom(configFor(id)), predictionsLocked: roomsCache[id]?.predictionsLocked === true };
+  });
   const finalDerived = deriveRooms(working);
-  resetIds.forEach(id => updates.set(id, finalDerived[id]));
+  resetIds.forEach(id => updates.set(id, {
+    ...finalDerived[id], predictionsLocked: working[id].predictionsLocked === true
+  }));
   for (const [id, expected] of Object.entries(finalDerived)) {
     if (!resetIds.has(id) && !same(working[id]?.playerDetails || {}, expected.playerDetails || {})) {
       updates.set(id, { ...working[id], playerDetails: expected.playerDetails });

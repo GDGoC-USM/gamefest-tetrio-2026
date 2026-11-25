@@ -49,7 +49,7 @@ function ready(config) {
 function closed(config) {
   const room = rooms[config.id] || {};
   return !currentUser || loadingPredictions || !settings[config.stage] ||
-    room.resultsPublished === true || room.status === "completed" || !ready(config);
+    room.predictionsLocked === true || room.resultsPublished === true || room.status === "completed" || !ready(config);
 }
 
 function savedSelection(prediction) {
@@ -187,13 +187,15 @@ function roomCard(config) {
     : loadingPredictions ? "Loading your saved predictions…"
     : busy ? "Saving changes…"
     : published ? "Results published. Predictions are locked."
+    : stored.predictionsLocked === true ? "Predictions are locked for this room. Saved picks are retained."
     : !ready(config) ? "Waiting for confirmed players."
     : !settings[config.stage] || stored.status === "completed" ? "Predictions are closed."
     : !dirty.has(id) && saved[id] ? "Your saved prediction is shown below."
     : "Choose your players, then save your prediction.";
   return `<article class="card prediction-card" id="prediction-${id}">
     <div class="prediction-card-top"><span class="room-tag">${escapeHTML(config.name)}</span>
-      <span class="pill">${published ? "COMPLETED" : stored.status === "live" ? "LIVE" : "UPCOMING"}</span></div>
+      <span class="pill">${published ? "COMPLETED" : stored.status === "live" ? "LIVE" : "UPCOMING"}</span>
+      ${stored.predictionsLocked === true ? '<span class="pill">PREDICTIONS LOCKED</span>' : ""}</div>
     <h3 class="prediction-title">${escapeHTML(config.name)}</h3>
     <p class="muted">${config.kind === "group"
       ? "Choose two qualifiers. Their order does not affect your score."

@@ -78,6 +78,7 @@ service cloud.firestore {
     }
     function available(id) {
       return ready(id) && open(id)
+        && room(id).get("predictionsLocked", false) != true
         && room(id).resultsPublished != true
         && room(id).status != "completed";
     }
