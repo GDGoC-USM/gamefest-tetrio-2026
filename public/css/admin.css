@@ -344,6 +344,35 @@ body {
   font-size: 12px;
 }
 
+.roster-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.roster-preview-group {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--admin-line);
+  border-radius: 9px;
+}
+
+.roster-preview-group h4 {
+  margin: 0 0 8px;
+}
+
+.roster-preview-group ol {
+  margin: 0;
+  padding-left: 24px;
+}
+
+.roster-preview-group li,
+#rosterImportMessage,
+#rosterImportCard code {
+  overflow-wrap: anywhere;
+}
+
 /* MATCH MANAGEMENT */
 
 .match-row {

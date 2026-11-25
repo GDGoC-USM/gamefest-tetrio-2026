@@ -241,6 +241,23 @@
           <p>View all rooms, assigned players, room status and published official results.</p>
         </div>
 
+        <div class="admin-card" id="rosterImportCard">
+          <h3>Import roster CSV</h3>
+          <p>Upload a CSV with the header <code>room,participantId,username</code>. Use rooms A–D, up to eight participants each. Export spreadsheets as CSV, not XLSX.</p>
+          <p>Each listed group’s entire roster is replaced in file order; remaining slots stay empty. Groups absent from the file are unchanged. Previewing does not save anything.</p>
+          <div class="field">
+            <label for="rosterCSV">Roster CSV file</label>
+            <input type="file" id="rosterCSV" accept=".csv,text/csv" aria-describedby="rosterImportHint">
+          </div>
+          <p id="rosterImportHint">Participant IDs stay as text, including leading zeros. Existing IDs retain their player keys. Reopen published groups before changing their rosters.</p>
+          <div class="actions">
+            <button type="button" class="btn secondary" id="previewRosterImportBtn">Preview CSV</button>
+            <button type="button" class="btn" id="saveRosterImportBtn" disabled>Save imported roster</button>
+          </div>
+          <p id="rosterImportMessage" role="status" aria-live="polite"></p>
+          <div id="rosterImportPreview" class="roster-preview-grid" hidden></div>
+        </div>
+
         <div id="roomsContainer" class="rooms-container"></div>
 
         <div class="admin-card">

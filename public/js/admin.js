@@ -8,6 +8,7 @@ import {
   validateGroupResult, validateSeriesResult, validateFFAResult,
   deriveRooms, dependentRoomIds, calculateLeaderboard
 } from "./tournament.js";
+import { parseRosterCSV, prepareRosterImport } from "./roster-import.js";
 
 const $ = id => document.getElementById(id);
 const adminLogin = $("adminLogin");
@@ -20,6 +21,7 @@ let editorRoom = null;
 let editorId = "";
 let busy = false;
 let authorized = false;
+let rosterPreview = null;
 const configFor = id => ROOM_CONFIG.find(config => config.id === id);
 const stableJSON = value => JSON.stringify(value, (_key, item) =>
   item && typeof item === "object" && !Array.isArray(item)
@@ -55,6 +57,7 @@ async function persist(action) {
     authBtn.disabled = false;
     $("saveRoomBtn").disabled = completed(editorRoom);
     $("roomStatus").disabled = completed(editorRoom);
+    $("saveRosterImportBtn").disabled = !rosterPreview?.plan.changedRoomIds.length;
   }
 }
 
@@ -107,6 +110,7 @@ authBtn.addEventListener("click", async () => {
 
 onAuthStateChanged(auth, async user => {
   authorized = false;
+  clearRosterPreview();
   adminLogin.hidden = true;
   adminContent.hidden = true;
   authBtn.hidden = false;
@@ -388,14 +392,13 @@ function dependencyWarning(id, verb) {
 }
 
 // Source, transitive resets, feeder metadata and dependent prediction deletion commit together.
-async function writeRoomChange(id, source, resetDependents) {
-  const resetIds = resetDependents ? dependentRoomIds(id) : [];
-  const working = { ...roomsCache, [id]: source };
+async function writeRoomChanges(sources, resetIds) {
+  const working = { ...roomsCache, ...Object.fromEntries(sources) };
   resetIds.forEach(dependentId => {
     working[dependentId] = emptyResult(working[dependentId] || baseRoom(configFor(dependentId)));
   });
   const derived = deriveRooms(working);
-  const updates = new Map([[id, source]]);
+  const updates = new Map(sources);
   resetIds.forEach(dependentId => {
     updates.set(dependentId, derived[dependentId]);
   });
@@ -421,6 +424,11 @@ async function writeRoomChange(id, source, resetDependents) {
     }
   });
   await batch.commit();
+  return deleted;
+}
+
+async function writeRoomChange(id, source, resetDependents) {
+  const deleted = await writeRoomChanges(new Map([[id, source]]), resetDependents ? dependentRoomIds(id) : []);
   await refreshAfterWrite(id);
   return deleted;
 }
@@ -456,6 +464,65 @@ $("cancelRoomBtn").addEventListener("click", () => {
   editorRoom = null;
   editorId = "";
 });
+
+function clearRosterPreview() {
+  rosterPreview = null;
+  $("rosterImportPreview").hidden = true;
+  $("rosterImportPreview").replaceChildren();
+  $("rosterImportMessage").textContent = "";
+  $("saveRosterImportBtn").disabled = true;
+}
+
+$("rosterCSV").addEventListener("change", clearRosterPreview);
+
+$("previewRosterImportBtn").addEventListener("click", () => persist(async () => {
+  clearRosterPreview();
+  const file = $("rosterCSV").files[0];
+  if (!file) throw new Error("Choose a roster CSV file first.");
+  const entries = parseRosterCSV(await file.text());
+  await fetchRooms();
+  requireInitialized();
+  const plan = prepareRosterImport(entries, roomsCache);
+  rosterPreview = { entries, plan, rooms: roomsCache };
+  $("rosterImportPreview").innerHTML = Object.entries(plan.rosters).map(([id, roster]) => {
+    const players = roster.players.filter(isPlayer);
+    return `<section class="roster-preview-group"><h4>Group ${escapeHTML(id)}</h4>
+      <p>${players.length} participant${players.length === 1 ? "" : "s"} · ${roster.players.length - players.length} empty slot${roster.players.length - players.length === 1 ? "" : "s"}</p>
+      <ol>${players.map(key => `<li>${escapeHTML(playerLabel(roster, key))}</li>`).join("")}</ol></section>`;
+  }).join("");
+  $("rosterImportPreview").hidden = false;
+  showMessage($("rosterImportMessage"), plan.changedRoomIds.length
+    ? `${entries.length} participants validated. Change groups: ${plan.changedRoomIds.join(", ")}. Reset dependent rooms: ${plan.resetRoomIds.join(", ") || "none"}. Saving deletes predictions for those dependent rooms; predictions for the listed groups are retained.`
+    : "This CSV already matches the saved rosters. No changes to save.", "info");
+}));
+
+$("saveRosterImportBtn").addEventListener("click", () => persist(async () => {
+  const preview = rosterPreview;
+  if (!preview) throw new Error("Preview a roster CSV before saving.");
+  await fetchRooms();
+  requireInitialized();
+  if (!same(roomsCache, preview.rooms)) {
+    clearRosterPreview();
+    throw new Error("Tournament rooms changed after the preview. Preview the CSV again before saving.");
+  }
+  const plan = prepareRosterImport(preview.entries, roomsCache);
+  if (!plan.changedRoomIds.length) return;
+  if (!confirm(`Import roster for groups ${plan.changedRoomIds.join(", ")}?\n\n` +
+    "Replace their entire rosters in file order and leave unused slots empty. Groups absent from the CSV are unchanged.\n\n" +
+    `Reset dependent rooms: ${plan.resetRoomIds.join(", ") || "none"}. Their results will be cleared and ALL their predictions deleted.\n\n` +
+    "Predictions for the imported groups are retained. Continue?")) return;
+  const sources = new Map(plan.changedRoomIds.map(id => [id, {
+    ...emptyResult(roomsCache[id]), ...plan.rosters[id],
+    name: configFor(id).name, stage: configFor(id).stage,
+    stageId: configFor(id).stage, formatVersion: 2,
+    status: roomsCache[id].status === "live" ? "live" : "upcoming"
+  }]));
+  const deleted = await writeRoomChanges(sources, plan.resetRoomIds);
+  clearRosterPreview();
+  $("rosterCSV").value = "";
+  await refreshAfterWrite(editorId);
+  notify(`Roster imported for groups ${plan.changedRoomIds.join(", ")}. ${deleted} dependent prediction(s) deleted; group predictions retained.`, "success");
+}));
 
 $("saveRoomBtn").addEventListener("click", () => persist(async () => {
   const previous = await freshEditor();
