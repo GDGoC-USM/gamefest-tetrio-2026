@@ -109,6 +109,15 @@ G. ADMINISTRATOR FEATURES
   downstream feeders above; one unresolved feeder does not erase another confirmed one.
 - Enter five ordered rounds for PLACEMENT and resolve any total-points tie explicitly.
 - Open or close group, quarter-final, semi-final and final prediction stages.
+- Under Admin > Rooms, use Lock predictions / Unlock predictions on an individual
+  room card. Lock a room when its match starts without closing its entire stage.
+  Saved picks remain visible and count toward scoring. Locked rooms reject new
+  picks, edits and user resets, including direct Firestore requests.
+  Unlocking still requires an open stage, ready players and unpublished/non-completed
+  results. It does not change match status or reopen results. PLACEMENT has no control.
+  Missing rooms/<id>.predictionsLocked means unlocked; only true locks the room.
+  New rooms start unlocked. Stage toggles, roster edits, result changes and format
+  migration retain explicit locks, including dependent-room locks.
 - Recalculate leaderboard totals after publishing or correcting results.
 - Reopen a published room when its result needs correction.
 
@@ -118,6 +127,8 @@ REOPEN / UNPUBLISH RESULTS
 - The room's player list and predictions for that same room are preserved.
 - All transitive dependent rooms reset because their participants depend on this result.
 - Predictions for dependent rooms are deleted; the reopened room's own picks remain.
+- Reopening results retains prediction locks on this room and dependent rooms.
+  Unlock predictions separately if organisers intend to accept picks again.
 - Publish corrected results and regenerate the affected bracket from confirmed feeders.
 - A group affects its QFs, dependent SFs, FINAL, THIRD and PLACEMENT. A QF affects
   its SF, FINAL, THIRD and PLACEMENT. An SF affects FINAL and THIRD.
