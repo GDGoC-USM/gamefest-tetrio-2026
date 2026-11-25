@@ -72,7 +72,7 @@
     <div class="header-brand">
       <a href="../index.html" class="partner-logo">
         <span class="logo-crop"><img src="../images/gdgoc-usm.png"
-             alt="Google Developer Groups on Campus USM"></span>
+             alt="Google Developer Group on Campus USM"></span>
       </a>
 
       <span class="logo-divider"></span>
@@ -81,7 +81,7 @@
         <span class="logo-crop"><img src="../images/gamefest-logo.png" alt="Gamefest logo"></span>
       </a>
 
-      <span class="brand-caption">GAMEFEST 2026 // TETRIO SHOWDOWN</span>
+      <span class="brand-caption">GAMEFEST // TETRIO SHOWDOWN</span>
     </div>
 
     <nav class="nav">
@@ -200,24 +200,24 @@
             <div class="format-item">
               <span class="format-number">01</span>
               <div>
-                <strong>Preliminary Round</strong>
-                <p>4 rooms with 8 players per room.</p>
+                <strong>Preliminary groups</strong>
+                <p>4 groups of up to 8 players. Play 5 FFA rounds; enter cumulative 1st and 2nd manually.</p>
               </div>
             </div>
 
             <div class="format-item">
               <span class="format-number">02</span>
               <div>
-                <strong>Semi-finals</strong>
-                <p>2 rooms with 4 qualified players per room.</p>
+                <strong>Quarterfinals and semi-finals</strong>
+                <p>Four 1v1 quarterfinals are first to 7. Two 1v1 semi-finals are first to 9.</p>
               </div>
             </div>
 
             <div class="format-item">
               <span class="format-number">03</span>
               <div>
-                <strong>Grand Final</strong>
-                <p>4 finalists compete for the championship.</p>
+                <strong>Final and placement matches</strong>
+                <p>Championship: first to 11. Third place: first to 9. Quarterfinal losers play a five-round, four-player placement FFA.</p>
               </div>
             </div>
           </div>
@@ -225,9 +225,10 @@
           <div class="format-note">
             <strong>Qualification rules</strong>
             <ul>
-              <li>Top 2 players from each preliminary room advance.</li>
-              <li>Top 2 players from each semi-final advance to the final.</li>
-              <li>Each correct prediction earns 10 points and 1 lucky draw ticket.</li>
+              <li>Group 1st and 2nd are ordered seeds, not roster positions.</li>
+              <li>Confirmed winners and losers automatically fill downstream rooms.</li>
+              <li>Every correct pick earns 1 point and 1 Lucky Draw ticket. PLACEMENT has no predictions.</li>
+              <li>FFA points are 4/3/2/1 per round. Tied total placings stay pending until an explicit organiser decision.</li>
             </ul>
           </div>
         </div>
@@ -243,27 +244,11 @@
         <div id="roomsContainer" class="rooms-container"></div>
 
         <div class="admin-card">
-          <h3>Generate Semi-finals</h3>
-          <p>
-            Room A and B qualifiers will enter SF1.
-            Room C and D qualifiers will enter SF2.
-          </p>
-
-          <button type="button" class="btn primary"
-                  id="generateSemifinalsBtn">
-            Generate Semi-finals
-          </button>
-        </div>
-
-        <div class="admin-card">
-          <h3>Generate Grand Final</h3>
-          <p>
-            The top 2 players from SF1 and SF2 will enter the Grand Final.
-          </p>
-
-          <button type="button" class="btn primary"
-                  id="generateFinalBtn">
-            Generate Grand Final
+          <h3>Initialize or migrate tournament format</h3>
+          <p>Loading this dashboard never changes rooms. Initialize explicitly to create missing rooms and replace incompatible legacy knockout rooms. Group rosters, metadata, results and predictions are retained.</p>
+          <p>Migration resets incompatible semi-finals, finals and their dependent rooms, and deletes incompatible dependent predictions. Review the confirmation before continuing.</p>
+          <button type="button" class="btn red" id="initializeTournamentBtn">
+            Initialize / migrate format
           </button>
         </div>
       </section>
@@ -272,7 +257,7 @@
       <section id="matches" class="admin-section" hidden>
         <div class="admin-section-heading">
           <h2>Matches Management</h2>
-          <p>Select a tournament stage and room to enter players, update room status, and publish official results.</p>
+          <p>Edit group participant details, review automatic feeders, and publish official results.</p>
         </div>
 
         <div class="admin-card">
@@ -289,9 +274,9 @@
             <h3 id="roomFormTitle">Manage Room</h3>
 
             <div class="field">
-              <label for="roomPlayers">Player names (one per line)</label>
-              <textarea id="roomPlayers" rows="8"
-                placeholder="Enter one player name per line"></textarea>
+              <label>Participant slots</label>
+              <p class="muted">Participant IDs are text (leading zeros are kept). Existing player keys never change when a username is corrected. To replace a participant, empty and save the slot before adding the replacement. Blank slots display TBD and have no ID.</p>
+              <div id="roomPlayers" class="participant-slots"></div>
             </div>
 
             <div class="field">
@@ -299,7 +284,6 @@
               <select id="roomStatus">
                 <option value="upcoming">Upcoming</option>
                 <option value="live">Live</option>
-                <option value="completed">Completed</option>
               </select>
             </div>
 
@@ -328,7 +312,7 @@
             </div>
 
             <p class="muted">
-              Preliminary rooms require 8 players. Semi-finals and Grand Final require 4 players.
+              Save group changes before publishing. Reopen completed rooms before editing their roster. Publishing, correcting or reopening results resets every dependent room and deletes its predictions; this room’s predictions are retained.
             </p>
           </div>
         </div>
@@ -348,6 +332,9 @@
 
         <div class="admin-card">
           <div id="stagePredictionControls"></div>
+          <p class="muted">The final stage includes THIRD. PLACEMENT is never open for predictions.</p>
+          <button type="button" class="btn secondary" id="recalculateLeaderboardBtn">Recalculate leaderboard</button>
+          <p class="muted">Replaces all scores with absolute correct-pick totals, including legacy predictions. Refresh Lucky Draw tickets after recalculation.</p>
         </div>
       </section>
 
@@ -388,7 +375,7 @@
         <div class="admin-card luckydraw-main">
 
           <div class="luckydraw-heading">
-            <span class="eyebrow">GAMEFEST 2026</span>
+            <span class="eyebrow">GAMEFEST</span>
             <h3>THE LUCKY WHEEL</h3>
             <p>
               Every ticket gives one chance to win.
@@ -477,10 +464,10 @@
       <span class="footer-logo-slot"><span class="logo-crop"><img src="../images/gamefest-logo.png" alt="Gamefest"></span></span>
     </div>
 
-    <p>GAMEFEST 2026 // TETRIO SHOWDOWN</p>
+    <p>GAMEFEST // TETRIO SHOWDOWN</p>
 
     <p class="footer-small">
-      Powered by Google Developer Groups on Campus USM
+      Powered by Google Developer Group on Campus USM
     </p>
 
   </footer>

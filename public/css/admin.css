@@ -505,3 +505,107 @@ body {
 #unpublishRoomBtn:hover:not(:disabled) {
   filter: brightness(1.12);
 }
+
+/* Tournament participant and result controls */
+.participant-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.participant-slot,
+.ffa-round,
+.feeder-slot {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--admin-line);
+  border-radius: 9px;
+  background: #ffffff04;
+}
+
+.participant-slot legend,
+.ffa-round legend {
+  padding: 0 6px;
+  color: #e4dafa;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.participant-slot small {
+  display: block;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.participant-slot .empty-slot-label,
+.empty-slot-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 10px 0;
+  color: #e4dafa;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.empty-slot-label input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #b77bf2;
+}
+
+.participant-slot:disabled,
+.field input:disabled,
+.field select:disabled {
+  opacity: .65;
+}
+
+.feeder-slot strong,
+#ffaTotals {
+  overflow-wrap: anywhere;
+}
+
+.ffa-round {
+  margin-bottom: 16px;
+}
+
+.ffa-order {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ffa-order .field {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+#roomResultFields {
+  margin: 24px 0;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+[aria-busy="true"] {
+  cursor: progress;
+}
+
+@media (max-width: 900px) {
+  .ffa-order {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .participant-slots,
+  .ffa-order {
+    grid-template-columns: 1fr;
+  }
+}

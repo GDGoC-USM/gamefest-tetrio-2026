@@ -3,6 +3,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/fireba
 
 import {
   getAuth,
+  connectAuthEmulator,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
@@ -13,6 +14,8 @@ import {
 import {
   getFirestore,
   collection,
+  connectFirestoreEmulator,
+  writeBatch,
   doc,
   getDoc,
   getDocs,
@@ -38,6 +41,12 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
+// Local previews are isolated even when emulators are unavailable: never fall back.
+if (["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)) {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+}
+
 export const googleProvider = new GoogleAuthProvider();
 
 // ==========================================
@@ -45,6 +54,7 @@ export const googleProvider = new GoogleAuthProvider();
 // ==========================================
 
 export {
+  writeBatch,
   signInWithPopup,
   signInWithEmailAndPassword,
   signOut,

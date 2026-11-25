@@ -18,9 +18,21 @@ These instructions apply to the entire repository. Read this file before running
 - Firebase setup and shared helpers live in `public/js/shared.js`; browser project configuration lives in `public/js/firebase-config.js`.
 - Firebase SDK imports currently use Google's CDN at version 11.10.0. Keep imports consistent.
 - `firebase.json` serves `public/` and points Firestore rules at `public/firestore.rules`.
-- There is no package manifest, build step, automated test suite, or checked-in CI workflow. Do not invent commands such as `npm test` or `npm run build`.
+- There is no package manifest, build step, or automated test suite. Do not invent commands such as `npm test` or `npm run build`. The only checked-in CI is the two Firebase Hosting deploy workflows in `.github/workflows/` (see "Project identity" below).
 - Reuse the existing page scripts, helpers, naming, and styling patterns. Keep changes focused; do not introduce a framework, dependency, or broad refactor without a task requirement.
 - Escape untrusted values when rendering HTML; reuse `escapeHTML` from `shared.js` where appropriate.
+
+## Project identity: do not change
+
+The Firebase project ID is `gamefest-tetrio-2026`. It appears in `public/js/firebase-config.js` (`projectId`, `authDomain`, `storageBucket`), `.firebaserc`, both files in `.github/workflows/`, and `README.md`. The public site is served at `https://gamefest-tetrio-showdown.web.app/`.
+
+- Do not rename, replace, or "fix" the project ID, the hosting site name, the repository name, or any of the values above, even though they contain "2026" and the event branding drops the year. Branding changes apply to visible text only: page titles, headings, footers, share metadata, and alt text.
+- A search-and-replace for "2026" or "gamefest" must exclude `firebase-config.js`, `.firebaserc`, `.github/`, and URLs. Review every match by hand.
+- Do not edit `.firebaserc`, `firebase.json`, or `.github/workflows/*` unless the user explicitly asks. Do not add other project IDs, aliases, or deploy targets.
+- Changing the project ID would point the site at a different (or non-existent) database and break sign-in, saved predictions, and admin access.
+- Pushing to `main` triggers `firebase-hosting-merge.yml`, which deploys to the live site (`channelId: live`). Never push to `main`. Pull requests trigger a preview deploy, so open one only when authorized.
+- Never commit or print the `FIREBASE_SERVICE_ACCOUNT_GAMEFEST_TETRIO_2026` secret or any other credential.
+- For tests that write data, use a separate test project or the local emulators, never `gamefest-tetrio-2026`. If a task seems to require changing the project ID, stop and ask.
 
 ## Firebase and data safety
 
