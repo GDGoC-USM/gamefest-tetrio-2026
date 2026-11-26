@@ -1,5 +1,8 @@
 import { db, collection, onSnapshot, escapeHTML } from "./shared.js";
 import { ROOM_CONFIG, deriveRooms, isPlayer, playerLabel, roomReady } from "./tournament.js";
+import { initPublicAuth } from "./auth-ui.js";
+
+initPublicAuth();
 
 const host = document.getElementById("matchList");
 let rooms = {};

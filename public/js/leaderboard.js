@@ -1,5 +1,8 @@
 import { db, collection, onSnapshot, escapeHTML } from "./shared.js";
 import { publicUsername } from "./usernames.js";
+import { initPublicAuth } from "./auth-ui.js";
+
+initPublicAuth();
 
 const body = document.getElementById("leaderboardBody");
 const note = document.getElementById("leaderboardNote");

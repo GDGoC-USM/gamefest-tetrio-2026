@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { ROOM_CONFIG, deriveRooms, dependentRoomIds, publishedDependentIds, dependentResets, withoutResults, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
-import { publicUsername } from '../public/js/usernames.js';
 
 function sample() {
   const rooms = {};
@@ -303,22 +302,14 @@ test('public room boards preserve Ended and pending results when derived feeders
       return elements.get(id);
     };
     let roomListener;
-    let authListener;
     const context = {
       ROOM_CONFIG, STAGES: [], deriveRooms, isPlayer, playerLabel, roomReady,
       document: { getElementById: element, querySelectorAll() { return []; } },
-      db: {}, auth: {}, publicUsername,
-      onAuthStateChanged(_auth, listener) { authListener = listener; }, collection: () => 'rooms',
+      db: {}, initPublicAuth() {}, collection: () => 'rooms',
       onSnapshot(_reference, listener) { roomListener = listener; },
       escapeHTML: value => String(value), console
     };
     runInNewContext(source.replace(/^import[\s\S]*?from "[^"]+";\r?\n/gm, ''), context);
-    if (page === 'home') {
-      authListener({ displayName: 'private@example.invalid', email: 'private@example.invalid' });
-      assert.equal(element('welcomeText').textContent, 'Signed in as Participant');
-      authListener({ displayName: 'Ari Ng', email: 'private@example.invalid' });
-      assert.equal(element('welcomeText').textContent, 'Signed in as Ari Ng');
-    }
     roomListener(snapshot);
     const html = element(page === 'matches' ? 'matchList' : 'roomGrid').innerHTML;
     for (const name of ['Group A', 'Quarter-final 1']) {

@@ -48,9 +48,16 @@
       <a href="admin/">ADMIN</a>
     </nav>
 
+    <button type="button" class="btn sign-in-btn" id="authBtn" aria-describedby="authDisclosure" disabled aria-busy="true">
+      RESTORING SESSION…
+    </button>
   </header>
 
   <main>
+    <section class="public-auth" aria-label="Your account">
+      <p id="authStatus" role="status" aria-live="polite" aria-atomic="true">Restoring your session…</p>
+      <p id="authDisclosure" class="muted">Signing in uses your valid Google name as the default public name on the leaderboard and in the Lucky Draw. No email is used. <a href="predict.html#usernameEditor">Choose or edit your public name on Predict</a>; existing names are preserved.</p>
+    </section>
 
     <!-- PAGE INTRO -->
     <section class="home-section">

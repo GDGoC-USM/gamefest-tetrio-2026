@@ -1,15 +1,16 @@
 import {
-  auth, db, signIn, signOut, onAuthStateChanged, collection, doc,
-  onSnapshot, runTransaction, setDoc, deleteDoc, serverTimestamp, escapeHTML, query, where
+  auth, db, collection, doc,
+  onSnapshot, setDoc, deleteDoc, serverTimestamp, escapeHTML, query, where
 } from "./shared.js";
 import {
   ROOM_CONFIG, STAGES, deriveRooms, isPlayer, playerLabel, roomReady, scorePrediction
 } from "./tournament.js";
-import { DEFAULT_USERNAME, normalizeUsername, isValidUsername, usernameProfileState, USERNAME_HINT } from "./usernames.js";
+import { DEFAULT_USERNAME, normalizeUsername, isValidUsername, USERNAME_HINT } from "./usernames.js";
+import { initializeUsernameProfile } from "./profiles.js";
+import { initPublicAuth } from "./auth-ui.js";
 
 const host = document.getElementById("predictionList");
 const notice = document.getElementById("predictNotice");
-const authBtn = document.getElementById("authBtn");
 const usernameEditor = document.getElementById("usernameEditor");
 const usernameForm = document.getElementById("usernameForm");
 const usernameInput = document.getElementById("usernameInput");
@@ -32,6 +33,7 @@ let picks = {};
 let dirty = new Set();
 let operations = new Map();
 let authEpoch = 0;
+let authRestored = false;
 let loadingPredictions = false;
 let unsubscribePredictions = null;
 let usernameLoaded = false;
@@ -78,17 +80,8 @@ async function loadUsernameProfile(user, epoch) {
   retryUsernameBtn.hidden = true;
   showUsernameNotice("Loading your full name…");
   try {
-    const reference = doc(db, "profiles", user.uid);
-    const profile = await runTransaction(db, async transaction => {
-      if (epoch !== authEpoch || currentUser?.uid !== user.uid) return null;
-      const snapshot = await transaction.get(reference);
-      if (epoch !== authEpoch || currentUser?.uid !== user.uid) return null;
-      const state = usernameProfileState(snapshot.exists() ? snapshot.data() : undefined, user);
-      if (state.initialize) {
-        transaction.set(reference, { username: state.username, updatedAt: serverTimestamp() });
-      }
-      return state;
-    });
+    const profile = await initializeUsernameProfile(user,
+      () => epoch === authEpoch && currentUser?.uid === user.uid);
     if (!profile || epoch !== authEpoch || currentUser?.uid !== user.uid) return;
     currentUsername.textContent = profile.username;
     const googleName = normalizeUsername(user.displayName);
@@ -312,7 +305,8 @@ function roomCard(config) {
       ? (room.qualifiers || []).map((key, index) => `${id}${index + 1}: ${playerLabel(room, key)}`).join(" · ")
       : `Winner: ${playerLabel(room, room.winner)}`
     : "Official result pending";
-  let message = !currentUser ? "Sign in with Google to save predictions."
+  let message = !authRestored ? "Restoring your session…"
+    : !currentUser ? "Sign in with Google to save predictions."
     : loadingPredictions ? "Loading your saved predictions…"
     : busy ? "Saving changes…"
     : published ? "Results published. Predictions are locked."
@@ -388,16 +382,8 @@ host.addEventListener("click", event => {
   render();
 });
 
-authBtn.addEventListener("click", async () => {
-  try {
-    if (auth.currentUser) await signOut(auth);
-    else await signIn();
-  } catch (error) {
-    showNotice(`Unable to change sign-in: ${error.message}`, "error");
-  }
-});
-
-onAuthStateChanged(auth, user => {
+initPublicAuth({ initializeProfile: false, onUserChanged: user => {
+  authRestored = true;
   const epoch = ++authEpoch;
   unsubscribePredictions?.();
   unsubscribePredictions = null;
@@ -409,7 +395,6 @@ onAuthStateChanged(auth, user => {
   dirty = new Set();
   operations = new Map();
   loadingPredictions = Boolean(user);
-  authBtn.textContent = user ? "SIGN OUT" : "SIGN IN WITH GOOGLE";
   showNotice(user ? "Loading your saved predictions…" : "Sign in with Google to save predictions.");
   render();
   if (!user) return;
@@ -447,7 +432,7 @@ onAuthStateChanged(auth, user => {
     if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
     showNotice(`Unable to load saved predictions: ${error.message}`, "error");
   });
-});
+} });
 
 STAGES.forEach(stage => {
   onSnapshot(doc(db, "settings", `rounds_${stage.id}`), snapshot => {

@@ -136,8 +136,12 @@ onAuthStateChanged(auth, async user => {
     const permitted = await isAdmin(user);
     if (epoch !== adminAuthEpoch || auth.currentUser?.uid !== user.uid) return;
     if (!permitted) {
-      await signOut(auth);
-      notify("Access denied. This account is not an administrator.", "error");
+      adminLogin.hidden = false;
+      adminPassword.value = "";
+      roomsCache = {};
+      editorRoom = null;
+      $("roomEditorCard").hidden = true;
+      notify("Access denied. This account is not an administrator. Your audience session is still signed in; sign out to use another account.", "error");
       return;
     }
     authorized = true;

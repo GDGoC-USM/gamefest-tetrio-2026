@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import * as usernames from '../public/js/usernames.js';
 
 const source = await readFile(new URL('../public/js/predict.js', import.meta.url), 'utf8');
+const profileSource = await readFile(new URL('../public/js/profiles.js', import.meta.url), 'utf8');
 const owner = Object.freeze({ uid: 'owner', displayName: 'José O’Neill', email: 'private@example.test' });
 const snapshot = profile => ({ exists: () => profile !== undefined, data: () => profile });
 
@@ -27,7 +28,7 @@ function profileHarness(profiles) {
   const context = {
     ...usernames, ROOM_CONFIG: [], STAGES: [], db: {}, auth: {},
     document: { getElementById: element },
-    onAuthStateChanged() {}, collection: (_db, name) => name, onSnapshot: () => () => {},
+    initPublicAuth() {}, collection: (_db, name) => name, onSnapshot: () => () => {},
     doc: (_db, collection, uid) => ({ path: `${collection}/${uid}` }),
     serverTimestamp: () => 'server-time',
     // Keep the old nontransactional path observable so this catches a regression
@@ -74,6 +75,8 @@ function profileHarness(profiles) {
   };
   // Execute the actual page loader and profile UI helpers, not a replica of
   // the initialization decision or Firebase imports/network implementation.
+  runInNewContext(profileSource.replace(/^import.*;\r?\n/gm, '').replace('export async function', 'async function')
+    + '\nglobalThis.initializeUsernameProfile = initializeUsernameProfile;', context);
   runInNewContext(source.replace(/^import[\s\S]*?from "[^"]+";\r?\n/gm, '') + `
     globalThis.loadTestProfile = user => {
       currentUser = user;
