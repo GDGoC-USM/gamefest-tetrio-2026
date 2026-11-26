@@ -375,6 +375,7 @@
       </section>
 
 
+
       <!-- ==========================================
           LUCKY DRAW
       ========================================== -->
@@ -388,6 +389,8 @@
             latest leaderboard entries.
           </p>
         </div>
+
+        <!-- LUCKY DRAW STATISTICS -->
 
         <div class="luckydraw-stats">
 
@@ -408,6 +411,8 @@
 
         </div>
 
+        <!-- LUCKY WHEEL -->
+
         <div class="admin-card luckydraw-main">
 
           <div class="luckydraw-heading">
@@ -423,10 +428,12 @@
             <div class="luckydraw-pointer">▼</div>
 
             <div id="ldWheel" class="luckydraw-wheel">
+
               <div class="luckydraw-wheel-center">
                 <span>GAMEFEST</span>
                 <strong>SPIN</strong>
               </div>
+
             </div>
 
           </div>
@@ -457,10 +464,111 @@
 
           </div>
 
-          <p id="ldMessage" class="admin-message"
-            role="status" aria-live="polite"></p>
+          <p
+            id="ldMessage"
+            class="admin-message"
+            role="status"
+            aria-live="polite"
+          ></p>
 
         </div>
+
+        <!-- PARTICIPANT MANAGEMENT -->
+
+        <div class="admin-card">
+
+          <div class="luckydraw-section-title">
+            <h3>Manage Participants</h3>
+            <span>
+              EDIT LUCKY DRAW ENTRIES
+            </span>
+          </div>
+
+          <!-- ADD MANUAL PARTICIPANT -->
+
+          <div class="ld-add-participant">
+
+            <h4>Add Manual Participant</h4>
+
+            <p class="muted">
+              Add someone who is not currently listed on the leaderboard.
+            </p>
+
+            <form id="ldAddEntryForm" class="ld-add-form">
+
+              <label>
+                Participant Name
+
+                <input
+                  type="text"
+                  id="ldNewName"
+                  placeholder="Enter participant name"
+                  maxlength="60"
+                  required
+                >
+              </label>
+
+              <label>
+                Number of Tickets
+
+                <input
+                  type="number"
+                  id="ldNewTickets"
+                  value="1"
+                  min="1"
+                  max="10000"
+                  step="1"
+                  required
+                >
+              </label>
+
+              <button
+                type="submit"
+                class="btn primary"
+              >
+                + ADD PARTICIPANT
+              </button>
+
+            </form>
+
+          </div>
+
+          <hr class="ld-editor-divider">
+
+          <!-- EDIT EXISTING PARTICIPANTS -->
+
+          <div class="luckydraw-section-title">
+            <h3>Edit Entries</h3>
+
+            <span>
+              <span id="ldEditorCount">0</span> PARTICIPANTS
+            </span>
+          </div>
+
+          <p class="muted">
+            Changes are saved automatically when you finish editing a field.
+            Setting tickets to zero removes that participant from the wheel.
+          </p>
+
+          <div id="ldEditorList">
+
+            <p class="muted">
+              Loading participants...
+            </p>
+
+          </div>
+
+          <button
+            type="button"
+            class="btn secondary"
+            id="ldResetEditsBtn"
+          >
+            ↻ RESET ALL EDITS
+          </button>
+
+        </div>
+
+        <!-- ELIGIBLE PARTICIPANTS -->
 
         <div class="admin-card">
 
@@ -470,10 +578,16 @@
           </div>
 
           <div id="ldParticipantsList">
-            <p class="muted">Loading participants...</p>
+
+            <p class="muted">
+              Loading participants...
+            </p>
+
           </div>
 
         </div>
+
+        <!-- WINNER HISTORY -->
 
         <div class="admin-card">
 
@@ -483,7 +597,11 @@
           </div>
 
           <div id="ldHistory">
-            <p class="muted">No winners yet.</p>
+
+            <p class="muted">
+              No winners yet.
+            </p>
+
           </div>
 
         </div>
