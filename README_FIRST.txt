@@ -84,17 +84,21 @@ F. AUDIENCE FEATURES
 - Group predictions select two distinct qualifiers; scoring ignores their order.
 - Every head-to-head series, including THIRD, accepts one winner prediction.
 - There are no predictions for PLACEMENT or other FFA finishing positions.
-- Each correct selected player earns exactly one point and one Lucky Draw ticket.
+- Each correct selected player earns exactly one point and one Lucky Draw entry.
 - Unpublished or unresolved results remain pending, not incorrect.
 - Legacy semi-final/final predictions are reevaluated against confirmed winners
   without old bonuses or podium scoring.
 - Users can view the public leaderboard.
-- Signed-in viewers can edit their public username on the prediction page, even
-  while predictions are locked. Use 3-24 characters: English letters, numbers,
-  spaces, underscores or hyphens, including at least one letter or number.
-- Usernames are separate profiles linked by UID; Google identity is unchanged.
+- Signed-in viewers can edit their public Full Name on the prediction page, even
+  while predictions are locked or ended. Use 3-80 Unicode letters, marks, numbers,
+  spaces and supported punctuation, including at least one letter or number.
+- Missing profiles default once to a valid Google display name, never an email
+  or its local part. Otherwise Participant is temporary and full-name entry is prompted.
+- Existing valid names are preserved. Timestamped Participant profiles require
+  explicit owner editing; only timestampless legacy placeholders auto-repair.
+- Full names use existing UID-linked profiles; Google identity is unchanged.
   Names appear after the next successful leaderboard recalculation.
-  Missing/invalid names use Participant, never account emails or prediction names.
+  Emails and invalid public names are replaced with Participant when rendered.
 
 G. ADMINISTRATOR FEATURES
 - On first setup or migration, explicitly confirm destructive initialisation in admin.
@@ -124,6 +128,11 @@ G. ADMINISTRATOR FEATURES
   Missing rooms/<id>.predictionsLocked means unlocked; only true locks the room.
   New rooms start unlocked. Stage toggles, roster edits, result changes and format
   migration retain explicit locks, including dependent-room locks.
+- Room status offers Upcoming, Live and Ended (stored as completed). Ending blocks
+  prediction creation, editing and user resets, but does not publish results,
+  advance competitors, assign rankings or award points. Results remain pending.
+- Ended rooms with unpublished results still allow official result entry.
+  Publish Results confirms them; published rooms still require explicit Reopen.
 - Recalculate leaderboard totals after publishing or correcting results.
 - Reopen a published room when its result needs correction.
 
@@ -141,15 +150,15 @@ REOPEN / UNPUBLISH RESULTS
 
 H. LEADERBOARD SCORING
 - Score only saved predictions against published, resolved results.
-- Each correct selected player earns one point and one correct-count/Lucky Draw ticket.
+- Each correct selected player earns one point and one correct-count/Lucky Draw entry.
 - Recalculation replaces absolute totals from current results, never increments them.
   Saving the same result again is idempotent; corrections can reduce scores.
 - Unresolved picks remain pending. Ignore FFA placements for prediction scoring.
 - Deduplicate legacy/new predictions for the same user and room to avoid double credit.
 - Public names come from valid private profiles, never saved prediction identity.
-  Profile changes do not change scores or ticket ownership.
-- Admin > Prediction Settings > Public username moderation: Load usernames,
-  select an account UID, and confirm Reset username to Participant. The user may
+  Profile changes do not change scores or entry ownership.
+- Admin > Prediction Settings > Full name moderation: Load full names,
+  select an account UID, and confirm Reset full name to Participant. The user may
   choose another name. Recalculate when ready to publish the reset.
 - Leaderboard replacement removes unexpected public fields. Rendering an invalid
   name as Participant does not remove the stored public data; any production
@@ -161,7 +170,7 @@ H. LEADERBOARD SCORING
 - Only new, meaningfully changed or malformed public rows are written; obsolete
   rows are deleted. Unchanged rows retain updatedAt, and a repeated unchanged
   recalculation makes no leaderboard writes/deletes. Stored and public tie rules
-  remain unchanged; alphabetical ordering may change when a username changes.
+  remain unchanged; alphabetical ordering may change when a full name changes.
 - Profiles are read once per distinct participant, in queries of at most 30 UIDs.
   There are no public profile listeners. Initial leaderboard loads/reconnects and
   genuine ranking changes can still consume substantial free-plan read quota.
@@ -169,13 +178,13 @@ H. LEADERBOARD SCORING
 I. LUCKY DRAW
 The administrator dashboard includes a Lucky Draw module. It is separate from the points leaderboard.
 - The draw loads the latest leaderboard entries.
-- Each participant receives one ticket per correct pick (the leaderboard correct count).
-- Participants with zero tickets are not eligible.
-- The wheel selects a ticket at random, so participants with more tickets have more entries.
-- After a participant wins, all of that participant's tickets are removed from the current draw and they are excluded from further draws.
-- Winner history is saved in the ticketAwards collection.
-- The administrator can undo any selected winner from the history. Undo restores that winner's ticket count, removes their winner record and makes them eligible again.
-- Use Refresh Latest Tickets to reload ticket counts from the latest leaderboard.
+- Each participant receives one entry per correct pick (the leaderboard correct count).
+- Participants with zero entries are not eligible.
+- The wheel selects an entry at random, so participants with more entries have more chances.
+- After a participant wins, all of that participant's entries are removed from the current draw and they are excluded from further draws.
+- Winner history remains in the existing ticketAwards collection.
+- The administrator can undo any selected winner from the history. Undo restores that winner's entry count, removes their winner record and makes them eligible again.
+- Use Refresh Latest Entries to reload counts from the latest leaderboard.
 
 IMPORTANT NOTES
 - This is a browser-based Firebase application; Firestore Security Rules are essential.
@@ -184,10 +193,10 @@ IMPORTANT NOTES
 - Predictions for the reopened room are retained; predictions for dependent rooms are removed when those rooms are reset.
 - Test publishing, reopening, feeders, scoring and Lucky Draw undo with synthetic data
   on the isolated local emulators before using the site for a live event.
-- For username/privacy releases, pause admin result/draw operations, deploy
+- For full-name/privacy releases, pause admin result/draw operations, deploy
   firestore:rules before hosting, and reload all admin tabs before resuming.
-  New profiles require the new rules; old admin tabs may fail stricter leaderboard
-  validation. See README.md for exact deployment commands and rollback cautions.
+  Unicode names require the updated validation rules. Existing completed-room
+  rule guards already block ended predictions. See README.md for deployment cautions.
 - Firebase quotas and pricing may change; consult Firebase documentation for current limits.
 
 ORGANISER CONFIRMATIONS BEFORE THE EVENT

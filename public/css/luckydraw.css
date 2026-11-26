@@ -1,4 +1,4 @@
-
+@charset "UTF-8";
 /* ==========================================
    LUCKY DRAW
 ========================================== */
@@ -19,7 +19,7 @@
 .luckydraw-stat span {
   color: var(--admin-muted);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: .12em;
 }
 
@@ -73,7 +73,7 @@
 
 .luckydraw-wheel {
   position: relative;
-  width: min(340px, 75vw);
+  width: min(340px, 75vw, 100%);
   aspect-ratio: 1;
   border: 9px solid #d4b1ff;
   border-radius: 50%;
@@ -103,7 +103,7 @@
   font-family: 'Google Sans', sans-serif;
 
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 700;
 
   text-align: center;
   text-transform: uppercase;
@@ -148,7 +148,7 @@
 .luckydraw-wheel-center span {
   color: #c8a5ff;
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: .1em;
 }
 
@@ -175,7 +175,7 @@
 .luckydraw-winner span {
   color: #c6a1ff;
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: .14em;
 }
 
@@ -184,12 +184,16 @@
   font-family: 'Google Sans', sans-serif;
   font-size: clamp(25px, 5vw, 38px);
   text-transform: uppercase;
+  max-width: 100%;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
 .luckydraw-winner small {
   color: var(--admin-muted);
   font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* ACTION BUTTONS */
@@ -202,7 +206,7 @@
 }
 
 .luckydraw-actions button {
-  min-width: 190px;
+  min-width: min(190px, 100%);
 }
 
 #ldSpinBtn {
@@ -237,7 +241,7 @@
 .luckydraw-section-title > span {
   color: var(--admin-muted);
   font-size: 9px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: .1em;
 }
 
@@ -250,18 +254,24 @@
   display: flex;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 9px;
 }
 
 .ld-participant-info strong {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
   color: #fff;
   font-size: 13px;
 }
 
 .ld-participant-info span {
+  flex-shrink: 0;
   color: #c6a1ff;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ld-progress {
@@ -282,6 +292,7 @@
 .ld-history-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
   padding: 13px 0;
   border-bottom: 1px solid var(--admin-line);
@@ -297,23 +308,26 @@
   border-radius: 50%;
   background: #8a4bd833;
   color: #d5b0ff;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .ld-history-info {
   display: flex;
-  flex: 1;
+  flex: 1 1 140px;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
 
 .ld-history-info strong {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
   color: #fff;
   font-size: 13px;
 }
 
 .ld-history-info span {
+  overflow-wrap: anywhere;
   color: var(--admin-muted);
   font-size: 10px;
 }
@@ -321,7 +335,7 @@
 .ld-history-ticket {
   color: #c6a1ff;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 

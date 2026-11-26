@@ -36,7 +36,7 @@
       flex: 0 0 auto;
       color: var(--admin-muted);
       font-size: 9px;
-      font-weight: 900;
+      font-weight: 700;
       letter-spacing: 1px;
     }
     .room-player strong {
@@ -227,7 +227,7 @@
             <ul>
               <li>Group 1st and 2nd are ordered seeds, not roster positions.</li>
               <li>Confirmed winners and losers automatically fill downstream rooms.</li>
-              <li>Every correct pick earns 1 point and 1 Lucky Draw ticket. PLACEMENT has no predictions.</li>
+              <li>Every correct pick earns 1 point and 1 Lucky Draw entry. PLACEMENT has no predictions.</li>
               <li>FFA points are 4/3/2/1 per round. Tied total placings stay pending until an explicit organiser decision.</li>
             </ul>
           </div>
@@ -239,7 +239,7 @@
         <div class="admin-section-heading">
           <h2>Room Management</h2>
           <p>View all rooms, assigned players, room status and published official results.</p>
-          <p>Lock predictions for an individual room below. Saved picks are retained. Unlocking still requires an open stage, confirmed players and unpublished results; it does not change match status.</p>
+          <p>Lock predictions for an individual room below. Saved picks are retained. Unlocking still requires an open stage, confirmed players and unpublished results in a room that has not ended; it does not change match status.</p>
         </div>
 
         <div class="admin-card" id="rosterImportCard">
@@ -302,8 +302,10 @@
               <select id="roomStatus">
                 <option value="upcoming">Upcoming</option>
                 <option value="live">Live</option>
+                <option value="completed">Ended</option>
               </select>
             </div>
+            <p class="muted">Save Room applies this status. Ended closes predictions but leaves results pending. It does not publish results, advance players or change scores; enter official results below and select Publish Results separately.</p>
 
             <div id="roomResultFields"></div>
 
@@ -330,7 +332,7 @@
             </div>
 
             <p class="muted">
-              Save group changes before publishing. Reopen completed rooms before editing their roster. Publishing, correcting or reopening results resets every dependent room and deletes its predictions; this room’s predictions are retained.
+              Save group changes before publishing. Reopen rooms with published results before editing their roster or status. Ended rooms without published results remain editable. Publishing, correcting or reopening results resets every dependent room and deletes its predictions; this room’s predictions are retained.
             </p>
           </div>
         </div>
@@ -353,20 +355,20 @@
           <p class="muted">The final stage includes THIRD. PLACEMENT is never open for predictions.</p>
           <p class="muted">Individual room locks are managed under Rooms. Opening a stage never removes a room lock.</p>
           <button type="button" class="btn secondary" id="recalculateLeaderboardBtn">Recalculate leaderboard</button>
-          <p class="muted">Recomputes absolute correct-pick totals and public usernames, including legacy predictions. Only changed rows are written. Sign-in does not recalculate. Refresh Lucky Draw tickets after recalculation.</p>
+          <p class="muted">Recomputes absolute correct-pick totals and full names, including legacy predictions. Only changed rows are written. Sign-in does not recalculate. Refresh Lucky Draw entries after recalculation.</p>
         </div>
 
         <div class="admin-card">
-          <h3>Public username moderation</h3>
-          <p>Reset an inappropriate audience username to Participant. Predictions, scores and Lucky Draw tickets are retained. The user can choose another name later.</p>
-          <button type="button" class="btn secondary" id="loadUsernamesBtn">Load usernames</button>
+          <h3>Full name moderation</h3>
+          <p>Reset an inappropriate audience full name to Participant. Predictions, scores and Lucky Draw entries are retained. The user can choose another name later.</p>
+          <button type="button" class="btn secondary" id="loadUsernamesBtn">Load full names</button>
           <div class="field">
-            <label for="moderationUid">Public username and account UID</label>
+            <label for="moderationUid">Full Name and account UID</label>
             <select id="moderationUid" aria-describedby="moderationMessage">
-              <option value="">Load usernames first</option>
+              <option value="">Load full names first</option>
             </select>
           </div>
-          <button type="button" class="btn red" id="resetUsernameBtn" disabled>Reset username to Participant</button>
+          <button type="button" class="btn red" id="resetUsernameBtn" disabled>Reset full name to Participant</button>
           <p id="moderationMessage" class="admin-message" role="status" aria-live="polite"></p>
           <p>Names update publicly after the next successful leaderboard recalculation. Use Recalculate leaderboard above when ready.</p>
         </div>
@@ -383,7 +385,7 @@
           <h2>Lucky Draw</h2>
           <p>
             Spin the wheel to select a winner based on the
-            latest leaderboard tickets.
+            latest leaderboard entries.
           </p>
         </div>
 
@@ -395,7 +397,7 @@
           </div>
 
           <div class="admin-card luckydraw-stat">
-            <span>TOTAL TICKETS</span>
+            <span>TOTAL ENTRIES</span>
             <strong id="ldTickets">0</strong>
           </div>
 
@@ -412,7 +414,7 @@
             <span class="eyebrow">GAMEFEST</span>
             <h3>THE LUCKY WHEEL</h3>
             <p>
-              Every ticket gives one chance to win.
+              Every entry gives one chance to win.
             </p>
           </div>
 
@@ -450,7 +452,7 @@
               class="btn secondary"
               id="ldRefreshBtn"
             >
-              ↻ REFRESH LATEST TICKETS
+              ↻ REFRESH LATEST ENTRIES
             </button>
 
           </div>
@@ -464,7 +466,7 @@
 
           <div class="luckydraw-section-title">
             <h3>Eligible Participants</h3>
-            <span>LIVE TICKET DISTRIBUTION</span>
+            <span>LIVE ENTRY DISTRIBUTION</span>
           </div>
 
           <div id="ldParticipantsList">

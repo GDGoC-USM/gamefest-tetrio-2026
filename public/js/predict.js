@@ -1,11 +1,11 @@
 import {
   auth, db, signIn, signOut, onAuthStateChanged, collection, doc,
-  onSnapshot, getDoc, setDoc, deleteDoc, serverTimestamp, escapeHTML, query, where
+  onSnapshot, runTransaction, setDoc, deleteDoc, serverTimestamp, escapeHTML, query, where
 } from "./shared.js";
 import {
   ROOM_CONFIG, STAGES, deriveRooms, isPlayer, playerLabel, roomReady, scorePrediction
 } from "./tournament.js";
-import { DEFAULT_USERNAME, normalizeUsername, isValidUsername, publicUsername, USERNAME_HINT } from "./usernames.js";
+import { DEFAULT_USERNAME, normalizeUsername, isValidUsername, usernameProfileState, USERNAME_HINT } from "./usernames.js";
 
 const host = document.getElementById("predictionList");
 const notice = document.getElementById("predictNotice");
@@ -76,20 +76,36 @@ async function loadUsernameProfile(user, epoch) {
   if (epoch !== authEpoch || currentUser?.uid !== user.uid || usernameBusy || usernameLoaded) return;
   setUsernameBusy(true);
   retryUsernameBtn.hidden = true;
-  showUsernameNotice("Loading your public username…");
+  showUsernameNotice("Loading your full name…");
   try {
-    const snapshot = await getDoc(doc(db, "profiles", user.uid));
-    if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
-    const username = publicUsername(snapshot.exists() ? snapshot.data().username : undefined);
-    currentUsername.textContent = username;
-    usernameInput.value = username;
+    const reference = doc(db, "profiles", user.uid);
+    const profile = await runTransaction(db, async transaction => {
+      if (epoch !== authEpoch || currentUser?.uid !== user.uid) return null;
+      const snapshot = await transaction.get(reference);
+      if (epoch !== authEpoch || currentUser?.uid !== user.uid) return null;
+      const state = usernameProfileState(snapshot.exists() ? snapshot.data() : undefined, user);
+      if (state.initialize) {
+        transaction.set(reference, { username: state.username, updatedAt: serverTimestamp() });
+      }
+      return state;
+    });
+    if (!profile || epoch !== authEpoch || currentUser?.uid !== user.uid) return;
+    currentUsername.textContent = profile.username;
+    const googleName = normalizeUsername(user.displayName);
+    usernameInput.value = profile.needsFullName
+      ? isValidUsername(googleName) && googleName !== DEFAULT_USERNAME ? googleName : ""
+      : profile.username;
     usernameLoaded = true;
     currentUsernameRow.hidden = false;
     usernameForm.hidden = false;
-    showUsernameNotice("");
+    showUsernameNotice(profile.needsFullName
+      ? "Please enter and save your full name. Until then, your public name is Participant."
+      : profile.initialize
+        ? "Your Google full name is saved. You can edit it below; it will appear after the next leaderboard update."
+        : "", profile.needsFullName ? "info" : "success");
   } catch (error) {
     if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
-    showUsernameNotice("Unable to load your public username. Retry loading it before editing.", "error");
+    showUsernameNotice("Unable to load or initialize your full name. Retry loading it before editing.", "error");
     retryUsernameBtn.hidden = false;
   } finally {
     if (epoch === authEpoch && currentUser?.uid === user.uid) {
@@ -120,16 +136,16 @@ usernameForm.addEventListener("submit", async event => {
     return;
   }
   setUsernameBusy(true);
-  showUsernameNotice("Saving your username…");
+  showUsernameNotice("Saving your full name…");
   try {
     await setDoc(doc(db, "profiles", user.uid), { username, updatedAt: serverTimestamp() });
     if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
     currentUsername.textContent = username;
     usernameInput.value = username;
-    showUsernameNotice("Username saved. Your new name will appear on the leaderboard after the next leaderboard update.", "success");
+    showUsernameNotice("Full name saved. Your new name will appear on the leaderboard after the next leaderboard update.", "success");
   } catch (error) {
     if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
-    showUsernameNotice("Unable to save your username. Try saving again.", "error");
+    showUsernameNotice("Unable to save your full name. Try saving again.", "error");
   } finally {
     if (epoch === authEpoch && currentUser?.uid === user.uid) {
       setUsernameBusy(false);
@@ -277,7 +293,7 @@ function savedFeedback(config, room) {
   const labels = selected.map(key => playerLabel(labelRoom, key)).join(" · ") || "No valid selection";
   return `<div class="saved-prediction">
     <strong>Saved${prediction.formatVersion !== 2 ? " legacy" : ""} pick:</strong> ${escapeHTML(labels)}
-    <p>${score.pending ? "Result pending — not scored yet." : `${score.correct} correct · ${score.correct} point${score.correct === 1 ? "" : "s"} · ${score.correct} Lucky Draw ticket${score.correct === 1 ? "" : "s"}`}</p>
+    <p>${score.pending ? "Result pending — not scored yet." : `${score.correct} correct · ${score.correct} point${score.correct === 1 ? "" : "s"} · ${score.correct} Lucky Draw ${score.correct === 1 ? "entry" : "entries"}`}</p>
     ${prediction.formatVersion !== 2 && config.kind === "series" ? '<small>Legacy picks are rescored against the confirmed winner only. No podium or semi-final bonus.</small>' : ""}
   </div>`;
 }
@@ -300,14 +316,15 @@ function roomCard(config) {
     : loadingPredictions ? "Loading your saved predictions…"
     : busy ? "Saving changes…"
     : published ? "Results published. Predictions are locked."
+    : stored.status === "completed" ? "Ended — results pending. Predictions are closed."
     : stored.predictionsLocked === true ? "Predictions are locked for this room. Saved picks are retained."
     : !ready(config) ? "Waiting for confirmed players."
-    : !settings[config.stage] || stored.status === "completed" ? "Predictions are closed."
+    : !settings[config.stage] ? "Predictions are closed."
     : !dirty.has(id) && saved[id] ? "Your saved prediction is shown below."
     : "Choose your players, then save your prediction.";
   return `<article class="card prediction-card" id="prediction-${id}">
     <div class="prediction-card-top"><span class="room-tag">${escapeHTML(config.name)}</span>
-      <span class="pill">${published ? "COMPLETED" : stored.status === "live" ? "LIVE" : "UPCOMING"}</span>
+      <span class="pill">${published || stored.status === "completed" ? "ENDED" : stored.status === "live" ? "LIVE" : "UPCOMING"}</span>
       ${stored.predictionsLocked === true ? '<span class="pill">PREDICTIONS LOCKED</span>' : ""}</div>
     <h3 class="prediction-title">${escapeHTML(config.name)}</h3>
     <p class="muted">${config.kind === "group"

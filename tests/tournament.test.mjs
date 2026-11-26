@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import { ROOM_CONFIG, deriveRooms, dependentRoomIds, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
+import { publicUsername } from '../public/js/usernames.js';
 
 function sample() {
   const rooms = {};
@@ -35,7 +38,7 @@ test('ordered qualifiers, not roster positions, drive every knockout and placeme
   assert.deepEqual(partial.QF1.players, ['A-player-4', '']);
 });
 
-test('points and Lucky Draw tickets are absolute 2, 2, then 1 after one correction', () => {
+test('points and Lucky Draw entries are absolute 2, 2, then 1 after one correction', () => {
   const rooms = sample();
   const predictions = ['QF1', 'FINAL'].map(roomId => ({ uid: 'viewer', displayName: 'Viewer', roomId, formatVersion: 2, selectedPlayers: [rooms[roomId].winner] }));
   assert.equal(calculateLeaderboard(predictions, rooms)[0].points, 2);
@@ -109,4 +112,188 @@ test('reopening traverses winner and loser dependencies without unrelated matche
   assert.deepEqual(dependentRoomIds('QF1'), ['SF1', 'FINAL', 'THIRD', 'PLACEMENT']);
   assert.deepEqual(dependentRoomIds('B'), ['QF1', 'QF3', 'SF1', 'SF2', 'FINAL', 'THIRD', 'PLACEMENT']);
   assert.deepEqual(dependentRoomIds('PLACEMENT'), []);
+});
+
+test('ended groups keep picks pending and advance nobody until results are published', () => {
+  const rooms = sample();
+  rooms.A.resultsPublished = false;
+  rooms.A.predictionsLocked = true;
+  const before = structuredClone(rooms);
+  const prediction = { uid: 'viewer', roomId: 'A', formatVersion: 2, selectedPlayers: rooms.A.qualifiers };
+  assert.equal(rooms.A.status, 'completed');
+  assert.deepEqual(scorePrediction(prediction, rooms), { correct: 0, pending: 2 });
+  assert.deepEqual(calculateLeaderboard([prediction], rooms)[0],
+    { uid: 'viewer', displayName: 'Participant', correct: 0, points: 0, pending: 2 });
+  const derived = deriveRooms(rooms);
+  assert.deepEqual(derived.QF1.players, ['', rooms.B.qualifiers[1]]);
+  assert.deepEqual(derived.QF3.players, [rooms.B.qualifiers[0], '']);
+  assert.deepEqual(derived.QF2.players, before.QF2.players);
+  assert.deepEqual(rooms, before);
+  Object.assign(rooms.A, validateGroupResult(rooms.A, rooms.A.qualifiers));
+  assert.equal(rooms.A.predictionsLocked, true);
+  assert.deepEqual(scorePrediction(prediction, rooms), { correct: 2, pending: 0 });
+  assert.deepEqual(deriveRooms(rooms).QF1.players, before.QF1.players);
+});
+
+test('ended series do not feed winners or losers, or score current and legacy picks, before publication', () => {
+  const rooms = sample();
+  rooms.QF1.resultsPublished = false;
+  const current = { uid: 'viewer', roomId: 'QF1', formatVersion: 2, selectedPlayers: [rooms.QF1.winner] };
+  const legacy = { uid: 'legacy', matchId: 'QF1', pick: rooms.QF1.winner };
+  for (const prediction of [current, legacy]) {
+    assert.deepEqual(scorePrediction(prediction, rooms), { correct: 0, pending: 1 });
+  }
+  const derived = deriveRooms(rooms);
+  assert.deepEqual(derived.SF1.players, ['', rooms.QF2.winner]);
+  assert.deepEqual(derived.PLACEMENT.players, ['', rooms.QF2.loser, rooms.QF3.loser, rooms.QF4.loser]);
+  assert.deepEqual(derived.SF2.players, rooms.SF2.players);
+  Object.assign(rooms.QF1, validateSeriesResult('QF1', rooms.QF1, rooms.QF1.scores));
+  assert.deepEqual(scorePrediction(current, rooms), { correct: 1, pending: 0 });
+  assert.deepEqual(deriveRooms(rooms).SF1.players, rooms.SF1.players);
+});
+
+test('admin status saves remain separate from publishing and reopening official results', async () => {
+  const source = await readFile(new URL('../public/js/admin.js', import.meta.url), 'utf8');
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      value: '', hidden: false, disabled: false, checked: false, innerHTML: '', textContent: '',
+      listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; },
+      querySelectorAll() { return []; }, setAttribute() {}, removeAttribute() {}
+    });
+    return elements.get(id);
+  };
+  const writes = [];
+  const errors = [];
+  let recalculations = 0;
+  const context = {
+    ROOM_CONFIG, STAGES: [], isPlayer, playerLabel, roomReady, validateGroupResult,
+    validateSeriesResult, validateFFAResult, deriveRooms, dependentRoomIds, calculateLeaderboard,
+    document: { getElementById: element, querySelectorAll() { return []; } },
+    auth: {}, onAuthStateChanged() {}, escapeHTML: value => String(value),
+    showMessage() {}, confirm: () => true, serverTimestamp: () => 'server-time',
+    console: { error: error => errors.push(error.message) },
+    recordWrite(sources, resetIds) {
+      writes.push({ sources: [...sources].map(([id, room]) => [id, structuredClone(room)]), resetIds: [...resetIds] });
+    },
+    recordRecalculation() { recalculations++; }
+  };
+  // Run the actual page handlers without Firebase imports or a browser/network dependency.
+  runInNewContext(source.replace(/^import[\s\S]*?from "[^"]+";\r?\n/gm, '') + `
+    authorized = true;
+    freshEditor = async () => editorRoom;
+    readRoster = () => ({ players: editorRoom.players, playerDetails: editorRoom.playerDetails || {} });
+    writeRoomChanges = async (sources, resetIds) => {
+      recordWrite(sources, resetIds);
+      sources.forEach((room, id) => { roomsCache[id] = room; });
+      return 0;
+    };
+    recalculateLeaderboard = async () => { recordRecalculation(); };
+    refreshAfterWrite = async (id, recalculate = true) => {
+      loadRoomEditor(id);
+      if (recalculate) await recalculateLeaderboard();
+    };
+    globalThis.openTestRoom = room => {
+      roomsCache = Object.fromEntries(ROOM_CONFIG.map(config => [config.id, baseRoom(config)]));
+      roomsCache.A = room;
+      loadRoomEditor("A");
+    };
+  `, context);
+  const original = sample().A;
+  context.openTestRoom({ ...original, status: 'upcoming', resultsPublished: false, predictionsLocked: true });
+  element('roomStatus').value = 'completed';
+  assert.equal(writes.length, 0, 'Selecting a status alone must not persist');
+  await element('saveRoomBtn').listeners.click();
+  assert.deepEqual(errors, []);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].resetIds, []);
+  assert.equal(writes[0].sources[0][1].status, 'completed');
+  assert.equal(writes[0].sources[0][1].resultsPublished, false);
+  assert.equal(writes[0].sources[0][1].predictionsLocked, true);
+  assert.equal(recalculations, 0);
+  assert.equal(element('roomStatus').value, 'completed');
+  assert.equal(element('roomStatus').disabled, false);
+  assert.equal(element('saveRoomBtn').disabled, false);
+  assert.equal(element('unpublishRoomBtn').hidden, true);
+  assert.equal(element('publishRoomBtn').textContent, 'Publish Results');
+  element('roomStatus').value = 'upcoming';
+  await element('saveRoomBtn').listeners.click();
+  assert.equal(writes[1].sources[0][1].status, 'upcoming');
+  assert.deepEqual(writes[1].resetIds, []);
+  assert.equal(recalculations, 0);
+  element('roomStatus').value = 'completed';
+  await element('saveRoomBtn').listeners.click();
+  element('qualifier1').value = '4';
+  element('qualifier2').value = '1';
+  await element('publishRoomBtn').listeners.click();
+  assert.deepEqual(errors, []);
+  assert.equal(writes[3].sources[0][1].resultsPublished, true);
+  assert.equal(writes[3].sources[0][1].status, 'completed');
+  assert.deepEqual(writes[3].resetIds, dependentRoomIds('A'));
+  assert.equal(recalculations, 1);
+  assert.equal(element('saveRoomBtn').disabled, true);
+  assert.equal(element('roomStatus').disabled, true);
+  assert.equal(element('unpublishRoomBtn').hidden, false);
+  await element('saveRoomBtn').listeners.click();
+  assert.equal(writes.length, 4, 'Published rooms reject even a direct save-handler call');
+  assert.match(errors.pop(), /Reopen this room explicitly/);
+  await element('unpublishRoomBtn').listeners.click();
+  assert.deepEqual(errors, []);
+  assert.equal(writes[4].sources[0][1].status, 'upcoming');
+  assert.equal(writes[4].sources[0][1].resultsPublished, false);
+  assert.equal(writes[4].sources[0][1].predictionsLocked, true);
+  assert.equal('qualifiers' in writes[4].sources[0][1], false);
+  assert.deepEqual(writes[4].resetIds, dependentRoomIds('A'));
+  assert.equal(recalculations, 2);
+  assert.equal(element('unpublishRoomBtn').hidden, true);
+});
+
+test('public room boards preserve Ended and pending results when derived feeders are not ready', async () => {
+  const rooms = sample();
+  rooms.A.resultsPublished = false;
+  rooms.B.resultsPublished = false;
+  rooms.B.status = 'live';
+  rooms.QF1.resultsPublished = false;
+  rooms.PLACEMENT.status = 'completed';
+  const snapshot = { docs: Object.entries(rooms).map(([id, room]) => ({ id, data: () => room })) };
+  for (const page of ['matches', 'home']) {
+    const source = await readFile(new URL(`../public/js/${page}.js`, import.meta.url), 'utf8');
+    const elements = new Map();
+    const element = id => {
+      if (!elements.has(id)) elements.set(id, { innerHTML: '', textContent: '', addEventListener() {} });
+      return elements.get(id);
+    };
+    let roomListener;
+    let authListener;
+    const context = {
+      ROOM_CONFIG, STAGES: [], deriveRooms, isPlayer, playerLabel, roomReady,
+      document: { getElementById: element, querySelectorAll() { return []; } },
+      db: {}, auth: {}, publicUsername,
+      onAuthStateChanged(_auth, listener) { authListener = listener; }, collection: () => 'rooms',
+      onSnapshot(_reference, listener) { roomListener = listener; },
+      escapeHTML: value => String(value), console
+    };
+    runInNewContext(source.replace(/^import[\s\S]*?from "[^"]+";\r?\n/gm, ''), context);
+    if (page === 'home') {
+      authListener({ displayName: 'private@example.invalid', email: 'private@example.invalid' });
+      assert.equal(element('welcomeText').textContent, 'Signed in as Participant');
+      authListener({ displayName: 'Ari Ng', email: 'private@example.invalid' });
+      assert.equal(element('welcomeText').textContent, 'Signed in as Ari Ng');
+    }
+    roomListener(snapshot);
+    const html = element(page === 'matches' ? 'matchList' : 'roomGrid').innerHTML;
+    for (const name of ['Group A', 'Quarter-final 1']) {
+      const card = html.match(/<article\b[\s\S]*?<\/article>/g).find(value => value.includes(`<h3>${name}</h3>`));
+      assert.match(card, /status-completed">ENDED</, `${page}: ${name} has an Ended badge`);
+      assert.match(card, /Ended — results pending/, `${page}: ${name} keeps its results pending`);
+      assert.doesNotMatch(card, /status-(?:live|upcoming)"/);
+    }
+    assert.match(html, /<h3>Group B<\/h3>/);
+    if (page === 'matches') {
+      assert.equal(element('liveMatches').textContent, 1);
+      assert.equal(element('upcomingMatches').textContent, 0);
+      assert.equal(element('completedMatches').textContent, ROOM_CONFIG.length - 1);
+      assert.match(html, /id="room-PLACEMENT"[\s\S]*?status-completed">ENDED</);
+    }
+  }
 });

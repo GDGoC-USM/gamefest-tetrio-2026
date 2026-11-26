@@ -16,6 +16,7 @@ import {
   collection,
   connectFirestoreEmulator,
   writeBatch,
+  runTransaction,
   doc,
   getDoc,
   getDocs,
@@ -55,6 +56,7 @@ export const googleProvider = new GoogleAuthProvider();
 
 export {
   writeBatch,
+  runTransaction,
   signInWithPopup,
   signInWithEmailAndPassword,
   signOut,
