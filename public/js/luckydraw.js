@@ -14,6 +14,7 @@ import {
   serverTimestamp,
   escapeHTML
 } from "./shared.js";
+import { publicUsername } from "./usernames.js";
 
 // ==========================================
 // LUCKY DRAW CONFIGURATION
@@ -89,7 +90,7 @@ async function loadSavedDraw() {
   const data = snapshot.data();
 
   currentEntries = Array.isArray(data.entries)
-    ? data.entries
+    ? data.entries.map(entry => ({ ...entry, displayName: publicUsername(entry.displayName) }))
     : [];
 
   excludedUids = Array.isArray(data.excludedUids)
@@ -101,7 +102,7 @@ async function loadSavedDraw() {
     winnerElement.innerHTML = `
       <span>LAST WINNER</span>
       <strong>
-        ${escapeHTML(data.lastWinner.displayName)}
+        ${escapeHTML(publicUsername(data.lastWinner.displayName))}
       </strong>
     `;
 
@@ -129,7 +130,7 @@ async function refreshTickets() {
 
   refreshBtn.disabled = true;
 
-  message("Loading latest leaderboard tickets...");
+  message("Loading latest leaderboard entries...");
 
   try {
 
@@ -179,7 +180,7 @@ async function refreshTickets() {
       // Skip previous winners.
       if (excludedUids.includes(uid)) return;
 
-      const displayName = person.displayName || "Player";
+      const displayName = publicUsername(person.displayName);
 
       // Four tickets = four wheel entries.
       for (let i = 0; i < tickets; i++) {
@@ -208,7 +209,7 @@ async function refreshTickets() {
     await loadHistory();
 
     message(
-      `Successfully loaded ${currentEntries.length} tickets.`,
+      `Successfully loaded ${currentEntries.length} ${currentEntries.length === 1 ? "entry" : "entries"}.`,
       "success"
     );
 
@@ -217,7 +218,7 @@ async function refreshTickets() {
     console.error("Lucky Draw refresh error:", error);
 
     message(
-      `Unable to load tickets: ${error.message}`,
+      `Unable to load entries: ${error.message}`,
       "error"
     );
 
@@ -243,7 +244,7 @@ function getParticipantGroups() {
 
       groups.set(entry.uid, {
         uid: entry.uid,
-        displayName: entry.displayName,
+        displayName: publicUsername(entry.displayName),
         tickets: 0
       });
 
@@ -278,7 +279,7 @@ function renderParticipants() {
     participantsList.innerHTML = `
       <p class="muted">
         No eligible participants.
-        Refresh the latest leaderboard to check tickets.
+        Refresh the latest leaderboard to check entries.
       </p>
     `;
 
@@ -303,7 +304,7 @@ function renderParticipants() {
           </strong>
 
           <span>
-            ${person.tickets} tickets
+            ${person.tickets} ${person.tickets === 1 ? "entry" : "entries"}
           </span>
 
         </div>
@@ -384,8 +385,8 @@ function renderWheel() {
     const label = document.createElement("span");
 
     label.className = "ld-wheel-label";
-    label.textContent = entry.displayName;
-    label.title = entry.displayName;
+    label.textContent = publicUsername(entry.displayName);
+    label.title = label.textContent;
 
     label.style.transform =
       `translate(-50%, -50%) rotate(${angle}deg) translateY(-108px) rotate(${-angle}deg)`;
@@ -419,7 +420,7 @@ async function spinWheel() {
   if (!isAuthorized || isSpinning) return;
 
   if (!currentEntries.length) {
-    message("There are no eligible tickets.", "error");
+    message("There are no eligible entries.", "error");
     return;
   }
 
@@ -447,7 +448,7 @@ async function spinWheel() {
     const winningEntry = currentEntries[winningIndex];
 
     const winnerUid = winningEntry.uid;
-    const winnerName = winningEntry.displayName;
+    const winnerName = publicUsername(winningEntry.displayName);
 
     // Calculate wheel rotation.
     const segmentAngle = 360 / total;
@@ -545,7 +546,7 @@ async function spinWheel() {
       </strong>
 
       <small>
-        Selected from ${winnerTicketCount} tickets!
+        Selected from ${winnerTicketCount} ${winnerTicketCount === 1 ? "entry" : "entries"}!
       </small>
     `;
 
@@ -554,7 +555,7 @@ async function spinWheel() {
     await loadHistory();
 
     message(
-      `${winnerName} has won! All their tickets have been removed.`,
+      `${winnerName} has won! All their entries have been removed.`,
       "success"
     );
 
@@ -599,7 +600,7 @@ async function undoSelectedWinner(historyId) {
 
   }
 
-  const winnerName = selectedWinner.displayName || "Player";
+  const winnerName = publicUsername(selectedWinner.displayName);
 
   const winnerUid = selectedWinner.uid;
 
@@ -610,14 +611,14 @@ async function undoSelectedWinner(historyId) {
 
   if (!winnerUid || ticketCount <= 0) {
 
-    message("The winner's original ticket information is unavailable.", "error");
+    message("The winner's original entry information is unavailable.", "error");
     return;
 
   }
 
   const confirmed = confirm(
     `Undo ${winnerName}'s win?\n\n` +
-    `${ticketCount} tickets will be restored and this winner record will be deleted.`
+    `${ticketCount} ${ticketCount === 1 ? "entry will" : "entries will"} be restored and this winner record will be deleted.`
   );
 
   if (!confirmed) return;
@@ -629,7 +630,7 @@ async function undoSelectedWinner(historyId) {
     button.disabled = true;
   });
 
-  message(`Restoring ${winnerName}'s tickets...`);
+  message(`Restoring ${winnerName}'s entries...`);
 
   try {
 
@@ -643,7 +644,7 @@ async function undoSelectedWinner(historyId) {
     const drawData = drawSnapshot.data();
 
     const savedEntries = Array.isArray(drawData.entries)
-      ? drawData.entries
+      ? drawData.entries.map(entry => ({ ...entry, displayName: publicUsername(entry.displayName) }))
       : [];
 
     const savedExcluded = Array.isArray(drawData.excludedUids)
@@ -708,7 +709,7 @@ async function undoSelectedWinner(historyId) {
       updatedDraw.lastWinner = latestRemainingWinner
         ? {
             uid: latestRemainingWinner.uid,
-            displayName: latestRemainingWinner.displayName,
+            displayName: publicUsername(latestRemainingWinner.displayName),
             ticketsAtWin: latestRemainingWinner.ticketsAtWin,
             drawnAt: latestRemainingWinner.drawnAt
           }
@@ -733,7 +734,7 @@ async function undoSelectedWinner(historyId) {
         winnerElement.innerHTML = `
           <span>LAST WINNER</span>
           <strong>
-            ${escapeHTML(latestRemainingWinner.displayName)}
+            ${escapeHTML(publicUsername(latestRemainingWinner.displayName))}
           </strong>
         `;
 
@@ -754,7 +755,7 @@ async function undoSelectedWinner(historyId) {
     renderParticipants();
 
     message(
-      `${winnerName}'s ${ticketCount} tickets have been restored. They can now win again!`,
+      `${winnerName}'s ${ticketCount} ${ticketCount === 1 ? "entry has" : "entries have"} been restored. They can now win again!`,
       "success"
     );
 
@@ -810,12 +811,14 @@ async function loadHistory() {
 
       })
 
-      .map(item => ({
-
-        id: item.id,
-        ...item.data()
-
-      }))
+      .map(item => {
+        const data = item.data();
+        return {
+          id: item.id,
+          ...data,
+          displayName: publicUsername(data.displayName)
+        };
+      })
 
       .sort((a, b) => {
 
@@ -869,7 +872,7 @@ async function loadHistory() {
           </div>
 
           <span class="ld-history-ticket">
-            ${Number(person.ticketsAtWin) || 0} tickets
+            ${Number(person.ticketsAtWin) || 0} ${Number(person.ticketsAtWin) === 1 ? "entry" : "entries"}
           </span>
 
           <button

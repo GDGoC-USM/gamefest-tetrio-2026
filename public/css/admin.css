@@ -1,4 +1,4 @@
-
+@charset "UTF-8";
 :root {
   --admin-bg: #17142b;
   --admin-surface: #211d3b;
@@ -23,12 +23,18 @@ body {
   color: var(--admin-text);
 }
 
+/* Keep administrator headings consistent with the public pages. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Google Sans', sans-serif;
+}
+
 /* HEADER */
 
 .admin-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 20px;
   padding: 20px 32px;
   background: #17142bee;
@@ -39,10 +45,15 @@ body {
   z-index: 20;
 }
 
+.admin-brand,
+.admin-account {
+  min-width: 0;
+}
+
 .admin-brand h1 {
   margin: 0;
   font-size: 22px;
-  font-weight: 950;
+  font-weight: 700;
   letter-spacing: .16em;
 }
 
@@ -67,6 +78,7 @@ body {
 #adminStatus {
   font-size: 12px;
   color: var(--admin-green);
+  overflow-wrap: anywhere;
 }
 
 /* MAIN LAYOUT */
@@ -234,6 +246,7 @@ body {
 
 .field {
   margin-bottom: 17px;
+  min-width: 0;
 }
 
 .field label {
@@ -248,6 +261,7 @@ body {
 .field select,
 .field textarea {
   width: 100%;
+  min-width: 0;
   padding: 12px 14px;
   background: #17132b;
   border: 1px solid #51476c;
@@ -289,7 +303,7 @@ body {
   );
   color: white;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
   transition: .2s;
 }
@@ -335,7 +349,7 @@ body {
   border-radius: 20px;
   color: #d3a0ff;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: .08em;
 }
 
@@ -381,6 +395,8 @@ body {
   align-items: center;
   gap: 15px;
   padding: 16px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
   border-bottom: 1px solid var(--admin-line);
 }
 
@@ -457,6 +473,7 @@ body {
 
   .nav-btn {
     width: auto;
+    flex: 0 0 auto;
     white-space: nowrap;
     text-align: center;
   }

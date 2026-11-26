@@ -42,7 +42,7 @@ There is no `package.json` or build step. Pure regression scenarios use Node's b
         ├── home.js             Homepage data and sign-in controls
         ├── matches.js          Public room and result display
         ├── predict.js          Prediction selection, saving, and room updates
-        ├── usernames.js        Public username validation and safe fallback
+        ├── usernames.js        Full-name validation and privacy-safe profile defaults
         ├── leaderboard.js      Public leaderboard display
         ├── leaderboard-sync.js Pure ranking and changed-row planning
         ├── admin.js            Room management, bracket generation, and scoring
@@ -56,52 +56,56 @@ Page scripts share Firebase access through `shared.js`. The main Firestore colle
 - Groups `A`, `B`, `C`, and `D` each have eight slots and play five rounds of cumulative free-for-all (FFA). Organisers manually publish two qualifiers in first/second order; roster order never determines seeds.
 - Eight qualifiers enter four head-to-head quarter-finals (`QF1`–`QF4`, first to 7). Semi-finals (`SF1`, `SF2`) and the third-place match (`THIRD`) are first to 9; `FINAL` is first to 11.
 - Semi-final winners enter `FINAL`; semi-final losers enter `THIRD`. The four quarter-final losers enter `PLACEMENT`: five FFA rounds, awarding 4/3/2/1 points per round. Total points determine fifth through eighth; tied totals leave placings pending until an organiser records an explicit decision.
-- Predictions select two group qualifiers (unordered for scoring) or one winner per head-to-head series. There are no predictions for FFA placement positions. Each correct selected player earns exactly **one point and one Lucky Draw ticket**. Unresolved results remain pending, not incorrect.
-- Administrators control prediction availability by stage and can lock individual rooms under **Admin → Rooms**. A room accepts predictions only when its stage is open, its room lock is off, its players are ready, and its results are unpublished/not completed. Locking preserves saved picks and blocks new picks, edits and user resets; unlocking never overrides the other restrictions. Leaderboard recalculation replaces absolute totals from current published results; resaving an unchanged result never adds points again. Legacy semi-final/final picks receive no old bonuses or podium scoring.
+- Predictions select two group qualifiers (unordered for scoring) or one winner per head-to-head series. There are no predictions for FFA placement positions. Each correct selected player earns exactly **one point and one Lucky Draw entry**. Unresolved results remain pending, not incorrect.
+- Administrators control prediction availability by stage and can lock individual rooms under **Admin → Rooms**. A room accepts predictions only when its stage is open, its room lock is off, its players are ready, and its results are unpublished and status is not Ended. Locking or ending preserves saved picks and blocks new picks, edits and user resets; unlocking never overrides the other restrictions. Leaderboard recalculation replaces absolute totals from current published results; resaving an unchanged result never adds points again. Legacy semi-final/final picks receive no old bonuses or podium scoring.
 - Lucky Draw excludes winners from subsequent draws until their award is undone.
 
-Reopening results clears the room's results, retains its players and own predictions, and transitively resets dependent rooms and deletes their predictions. A room with published downstream results cannot be published, corrected, reopened or re-rostered; the dashboard names the downstream rooms to reopen first, deepest round first. Resets are targeted: only feeder rooms whose confirmed players change are cleared, so a correction that keeps the same winner preserves downstream results and audience predictions. Room updates, the dependency check and the dependent-prediction lookup commit in one Firestore transaction; corrected confirmed results feed the bracket again. See [README_FIRST.txt](README_FIRST.txt) for exact feeds, operating steps, and outstanding organiser confirmations.
+Reopening results clears the room's results, retains its players and own predictions, and transitively resets dependent rooms and deletes their predictions. A room with published downstream results cannot be published, corrected, reopened or re-rostered; the dashboard names the downstream rooms to reopen first, deepest round first. Resets are targeted: only feeder rooms whose confirmed players change are cleared, so a correction that keeps the same winner preserves downstream results and audience predictions. Room updates, the dependency check and the stale-state check commit in one Firestore transaction; dependent predictions are then deleted in batches. Corrected confirmed results feed the bracket again. See [README_FIRST.txt](README_FIRST.txt) for exact feeds, operating steps, and outstanding organiser confirmations.
 
 Room locks use `rooms/<id>.predictionsLocked`. Only `true` locks a room; a missing field means unlocked for backward compatibility. New rooms start unlocked. Stage toggles, roster changes, publishing/reopening results and format migration retain explicit locks, including locks on dependent rooms. Changing a lock alone never changes match status, results, bracket dependencies or saved predictions. `PLACEMENT` has no predictions or lock control.
 
+Administrators can save **Upcoming**, **Live** or **Ended** under the room editor. Ended reuses the existing stored `status: "completed"`; it does not publish results, assign rankings, advance feeders or score picks. Ended rooms with unpublished results remain editable for official result entry and display results pending. Only **Publish Results** confirms results and feeds the bracket. Published rooms must still use **Reopen / Unpublish Results** before corrections; reopening returns them to Upcoming and preserves explicit prediction locks.
+
 Player references remain stable legacy string keys in `rooms/<id>.players`. Separate `playerDetails[key]` fields hold a text participant ID (preserving leading zeroes) and a trimmed username. Organisers enter the roster in the admin dashboard; never commit a real roster. Initialising/migrating the tournament requires explicit destructive confirmation in the admin dashboard; it never runs automatically on page load.
 
-## Public usernames and privacy
+## Full names and privacy
 
-On the prediction page, signed-in viewers can save a public username independently of predictions, including while predictions are locked. Names contain 3–24 characters: English letters (A–Z, a–z), numbers, spaces, underscores and hyphens, with at least one letter or number. Ordinary spaces at the edges are trimmed; control characters, line breaks, non-ASCII characters and other whitespace are rejected. Duplicate names are allowed.
+On the prediction page, signed-in viewers can save their public **Full Name** independently of predictions, including while predictions are locked or ended. Names contain 3–80 Unicode code points: letters, combining marks, numbers, ordinary spaces and the punctuation `. , ' ’ · ( ) _ -`, with at least one letter or number. Ordinary edge spaces are trimmed. Emails, HTML, control characters, line breaks and invisible formatting characters are rejected. Duplicate names are allowed; Firebase UID remains the permanent identity. Competitor TETR.IO usernames and participant IDs are unchanged.
 
-`profiles/<uid>` stores exactly `username` and `updatedAt` (a server timestamp). Owners can retrieve and save their own profile, but cannot list profiles or read another person's profile. Authorised administrators can retrieve individual profiles and list profiles. They can reset another account's name only to `Participant`, not assign an arbitrary replacement. Clients cannot delete profiles or grant administrative roles.
+For a missing profile, the prediction page saves a valid Google account display name once; it never derives a public name from an email or its local part. If Google provides no valid name, viewers see a temporary `Participant` label and a prompt to enter their full name. Existing valid custom profiles are never overwritten on sign-in. An old `Participant` profile without `updatedAt` can be repaired on its owner's next login; timestamped `Participant` profiles require explicit owner editing because they may be moderator resets or deliberate choices.
 
-The prediction page reads the profile once per sign-in/session load, not through a real-time listener. It clears profile state on sign-out or account switching. Changing a name never changes Google/Firebase Authentication identity, saved predictions, scores or ticket ownership. Names become public at the next successful administrator leaderboard recalculation, not immediately.
+`profiles/<uid>` still stores exactly `username` and `updatedAt` (a server timestamp); `username` is retained as an internal compatibility field, not an audience-facing label. Owners can retrieve and save their own profile, but cannot list profiles or read another person's profile. Authorised administrators can retrieve individual profiles and list profiles. They can reset another account's name only to `Participant`, not assign an arbitrary replacement. Clients cannot delete profiles or grant administrative roles.
 
-Under **Admin → Prediction Settings → Public username moderation**, select **Load usernames**, select the name/account UID, and confirm **Reset username to Participant**. Recalculate the leaderboard when ready. Users may choose another name afterwards; permanent restrictions and automatic filtering are not implemented.
+The prediction page reads the profile once per sign-in/session load, not through a real-time listener. Initialization uses a Firestore transaction, so a concurrent custom-name save or moderator reset is preserved rather than overwritten by a stale Google default. A normal load reads one profile and adds at most one initialization write; contention can require transaction retries. Existing valid profiles add no writes. Profile state clears on sign-out or account switching. Names become public at the next successful administrator leaderboard recalculation, not immediately. Changing a name never changes authentication identity, predictions, scores, Lucky Draw ownership or previous-winner exclusions.
 
-Leaderboard names come only from valid profiles or `Participant`, never Google identity, email or legacy prediction names. The required prediction `displayName` compatibility field is saved as `Participant`; existing private predictions are not rewritten. Public rendering also replaces invalid stored names with `Participant` and escapes HTML.
+Under **Admin → Prediction Settings → Full name moderation**, select **Load full names**, select the name/account UID, and confirm **Reset full name to Participant**. Recalculate the leaderboard when ready. Users may choose another name afterwards; permanent restrictions and automatic filtering are not implemented.
+
+Leaderboard and Lucky Draw names use valid stored public names or `Participant`, never emails or legacy prediction identities. The required prediction `displayName` compatibility field remains `Participant`; private predictions and historical award records are not migrated. Public names are validated and escaped at rendering boundaries. Full names are intentionally public: the profile editor explains this before a viewer saves a custom name.
 
 The public `leaderboard/<uid>` schema is exactly:
 
 | Field | Value |
 | --- | --- |
 | `uid` | Permanent Firebase UID, equal to the document ID |
-| `displayName` | Valid profile username, otherwise `Participant` |
-| `correct` | Non-negative integer correct-pick/ticket count |
+| `displayName` | Valid profile full name, otherwise `Participant` |
+| `correct` | Non-negative integer correct-pick/Lucky Draw entry count |
 | `points` | Equal to `correct` |
 | `pending` | Non-negative integer unresolved-pick count |
 | `rank` | Existing sequential persisted rank |
 | `updatedAt` | Server timestamp of the last persisted change |
 
-Public equal-score rows retain shared ranks and alphabetical name ordering, then UID ordering. Renaming may change ordering within ties, but never scores or ticket ownership. Recalculation replaces documents without merging, removing stale names and unexpected fields. Hiding an invalid name in the UI does **not** remove the underlying publicly readable document fields; production inspection or repair needs separate authorisation. No automatic production cleanup is provided.
+Public equal-score rows retain shared ranks and alphabetical name ordering, then UID ordering. Renaming may change ordering within ties, but never scores or entry ownership. Recalculation replaces documents without merging, removing stale names and unexpected fields. Hiding an invalid name in the UI does **not** remove the underlying publicly readable document fields; production inspection or repair needs separate authorisation. No automatic production cleanup is provided.
 
 
 ## Leaderboard recalculation and Spark usage
 
 Use **Admin → Prediction Settings → Recalculate leaderboard** to intentionally refresh names or repair stale data. Signing into the dashboard no longer recalculates. Publishing, correcting or reopening results, roster changes and format initialisation retain their automatic recalculation. Stage toggles, room locks and status-only saves do not recalculate. Resubmitting an unchanged published result still performs an intentional repair/recalculation without resetting predictions.
 
-Each recalculation reads predictions, rooms and the existing leaderboard once. Reopening, correcting or re-rostering a room reads the fresh rooms and only the reset rooms' predictions inside one transaction, then deletes those predictions in batches of at most 450. If a delete batch fails after the room state committed, the dashboard still recalculates the leaderboard, reports how many predictions remain, and leaves them pending: they score nothing while their rooms are unpublished and are removed the next time those rooms are reset. It scores/deduplicates predictions, queries profiles only for distinct participating UIDs in document-ID groups of at most 30, and reuses one in-memory username map. It does not read a profile per prediction or attach any profile listener.
+Each recalculation reads predictions, rooms and the existing leaderboard once. Reopening, correcting or re-rostering a room reads the fresh rooms inside one transaction, then reads only the reset rooms' predictions and deletes them in batches of at most 450. If a delete batch fails after the room state committed, the dashboard still recalculates the leaderboard, reports how many predictions remain, and leaves them pending: they score nothing while their rooms are unpublished and are removed the next time those rooms are reset. It scores/deduplicates predictions, queries profiles only for distinct participating UIDs in document-ID groups of at most 30, and reuses one in-memory username map. It does not read a profile per prediction or attach any profile listener.
 
 The existing leaderboard snapshot is compared against the exact public schema and all persisted ranking values. New, changed, malformed or extra-field rows are fully replaced; obsolete participants are deleted. An unchanged row retains its `updatedAt`. An unchanged recalculation commits no batches. Write/delete batches remain capped at 450 operations; failures surface through the existing dashboard error path. If some batches committed before a later failure, explicitly recalculate again: totals remain absolute and repeatable.
 
-Stored ranks preserve descending correct counts, alphabetical names and stable ordering for identical names. Public ties still share a rank, with UID ordering after name comparison. A rename can legitimately move several stored ranks within a tie. Username changes never change prediction selections or UID-based ticket ownership. Reopening still clears results and dependent predictions through the existing workflow; recalculation simply reflects the remaining published results.
+Stored ranks preserve descending correct counts, alphabetical names and stable ordering for identical names. Public ties still share a rank, with UID ordering after name comparison. A rename can legitimately move several stored ranks within a tie. Full-name changes never change prediction selections or UID-based entry ownership. Reopening still clears results and dependent predictions through the existing workflow; recalculation simply reflects the remaining published results.
 
 Illustrative estimates below assume 150 leaderboard rows, 150 connected leaderboard viewers and 150 participating profiles. They are **not production usage or emulator billing measurements**:
 
@@ -282,19 +286,19 @@ firebase emulators:exec --only firestore --project demo-gamefest "node --test te
 
 Java 21 is required. The test skips without `FIRESTORE_EMULATOR_HOST`, rejects non-loopback emulator hosts, loads the checked-in rules and cleans up its own fixture documents. It covers room-lock create/update/delete denial, legacy resets, administrator-only lock changes, independent rooms, stage/result/readiness restrictions and head-to-head predictions. Inspect live updates and controls in the browser separately.
 
-Username validation and privacy regressions:
+Full-name validation and privacy regressions (test filenames retain the internal username naming):
 
 ```sh
-node --test tests/usernames.test.mjs tests/tournament.test.mjs tests/leaderboard-sync.test.mjs
+node --test tests/usernames.test.mjs tests/profile-initialization.test.mjs tests/tournament.test.mjs tests/leaderboard-sync.test.mjs
 firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
 ```
 
-The username unit and rule tests share the same validation cases. Rule tests use unique disposable demo projects, reject non-loopback hosts, and cover owner/admin access, forbidden listing, moderation, field allowlists, public leaderboard reads and private predictions. Without `FIRESTORE_EMULATOR_HOST`, rule tests explicitly skip; a skip or static inspection does not prove runtime enforcement. If Java 21 or later is unavailable, run the unit command and report the emulator tests as unexecuted.
+The full-name unit and rule tests share the same validation cases. Rule tests use unique disposable demo projects, reject non-loopback hosts, and cover owner/admin access, forbidden listing, moderation, field allowlists, public leaderboard reads and private predictions. Without `FIRESTORE_EMULATOR_HOST`, rule tests explicitly skip; a skip or static inspection does not prove runtime enforcement. If Java 21 or later is unavailable, run the unit command and report the emulator tests as unexecuted.
 
 Browser checklist on the local Auth/Firestore/Hosting emulators:
 
 - Desktop and mobile: sign in with a synthetic Google account, save a valid name, refresh and verify persistence; confirm Google identity is unchanged.
-- Try too-short/long names, email, HTML, punctuation-only, Unicode, control characters and line breaks; verify clear validation guidance.
+- Try too-short/long names, email, HTML, punctuation-only, controls and line breaks; verify rejection. Check Unicode names, apostrophes and other supported punctuation save correctly.
 - Save a name with predictions locked; confirm the saved predictions and scores remain unchanged.
 - Sign out and switch accounts during loading/saving; confirm no previous profile state remains.
 - As administrator, load names, cancel a reset, then confirm a reset; verify it appears only after recalculation.
@@ -313,7 +317,7 @@ firebase deploy --only firestore:rules --project gamefest-tetrio-2026
 firebase deploy --only hosting --project gamefest-tetrio-2026
 ```
 
-Rules-first prevents the new editor from running against rules that deny all profiles. Prediction writes retain their existing schema, so existing prediction clients remain compatible. Old admin tabs may fail the stricter leaderboard validation; close/reload them before resuming operations. If the Hosting deploy fails, leave the stricter rules in place and finish the Hosting deployment rather than weakening privacy validation.
+Rules-first allows Unicode full-name profiles and their public leaderboard rows before the new editor runs. Prediction writes retain their schema, and the existing rules already block `completed` rooms. Old clients may not render new Unicode names correctly; close/reload public and admin tabs before resuming operations. If Hosting deployment fails, finish the forward deployment rather than weakening privacy validation.
 
 After Hosting deploys, require administrators to reload the dashboard. Verify access with approved accounts before resuming operations. A maintainer must separately authorise any production recalculation that replaces stale public names/fields; deployment alone does not clean existing Firestore documents. Do not inspect or repair production data merely to verify this release.
 

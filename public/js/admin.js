@@ -7,8 +7,7 @@ import {
   ROOM_CONFIG, STAGES, isPlayer, playerLabel, roomReady,
   validateGroupResult, validateSeriesResult, validateFFAResult,
   deriveRooms, dependentRoomIds, calculateLeaderboard,
-  hasPublishedResults as completed, publishedDependentIds,
-  dependentResets, withoutResults
+  publishedDependentIds, dependentResets, withoutResults
 } from "./tournament.js";
 import { parseRosterCSV, prepareRosterImport } from "./roster-import.js";
 import { DEFAULT_USERNAME, publicUsername } from "./usernames.js";
@@ -33,6 +32,7 @@ const stableJSON = value => JSON.stringify(value, (_key, item) =>
   item && typeof item === "object" && !Array.isArray(item)
     ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 const same = (left, right) => stableJSON(left) === stableJSON(right);
+const published = room => room?.resultsPublished === true;
 
 function notify(message, type = "info") {
   showMessage(adminContent.hidden ? $("adminMessage") : $("dashboardMessage"), message, type);
@@ -60,8 +60,8 @@ async function persist(action) {
     adminContent.removeAttribute("aria-busy");
     adminContent.inert = false;
     authBtn.disabled = false;
-    $("saveRoomBtn").disabled = completed(editorRoom);
-    $("roomStatus").disabled = completed(editorRoom);
+    $("saveRoomBtn").disabled = published(editorRoom);
+    $("roomStatus").disabled = published(editorRoom);
     $("saveRosterImportBtn").disabled = !rosterPreview?.plan.changedRoomIds.length;
     $("resetUsernameBtn").disabled = !authorized || !moderationProfiles.has($("moderationUid").value);
   }
@@ -172,7 +172,7 @@ function baseRoom(config) {
 }
 
 function resultText(config, room) {
-  if (!room.resultsPublished) return "Results pending";
+  if (!published(room)) return room.status === "completed" ? "Ended — results pending" : "Results pending";
   const label = key => playerLabel(room, key);
   if (config.kind === "group") {
     return (room.qualifiers || []).map((key, index) => `${index + 1}. ${label(key)}`).join(" / ");
@@ -191,7 +191,7 @@ function renderRooms() {
     return `<article class="admin-card room-overview-card">
       <span class="room-tag">${escapeHTML(config.stage)} · ${escapeHTML(config.id)}</span>
       <h3>${escapeHTML(config.name)}</h3>
-      <p class="muted">${escapeHTML(room.status || "upcoming")}${config.target ? ` · FT${config.target}` : ""}</p>
+      <p class="muted">${published(room) || room.status === "completed" ? "Ended" : room.status === "live" ? "Live" : "Upcoming"}${config.target ? ` · FT${config.target}` : ""}</p>
       <div class="room-player-list">${Array.from({ length: config.size }, (_, index) =>
         `<div class="room-player"><span>${index + 1}</span><strong>${escapeHTML(playerLabel(room, room.players?.[index] || ""))}</strong></div>`
       ).join("")}</div>
@@ -263,14 +263,14 @@ function loadRoomEditor(id) {
   editorId = id;
   editorRoom = roomsCache[id] || baseRoom(config);
   const room = editorRoom;
-  const locked = config.kind !== "group" || completed(room);
+  const locked = config.kind !== "group" || published(room);
   $("roomEditorCard").hidden = false;
   $("roomFormTitle").textContent = config.name;
-  $("roomStatus").value = room.status === "live" ? "live" : "upcoming";
-  $("roomStatus").disabled = completed(room);
-  $("saveRoomBtn").disabled = completed(room);
-  $("publishRoomBtn").textContent = room.resultsPublished ? "Correct published results" : "Publish Results";
-  $("unpublishRoomBtn").hidden = !completed(room);
+  $("roomStatus").value = published(room) || room.status === "completed" ? "completed" : room.status === "live" ? "live" : "upcoming";
+  $("roomStatus").disabled = published(room);
+  $("saveRoomBtn").disabled = published(room);
+  $("publishRoomBtn").textContent = published(room) ? "Correct published results" : "Publish Results";
+  $("unpublishRoomBtn").hidden = !published(room);
   $("roomPlayers").innerHTML = Array.from({ length: config.size }, (_, index) => {
     const key = room.players?.[index] || "";
     const detail = isPlayer(key) ? room.playerDetails?.[key] || {} : {};
@@ -509,9 +509,9 @@ async function writeRoomChanges(sources, resetIds, action, expected = roomsCache
   return { deleted, failure, resetIds };
 }
 
-async function writeRoomChange(id, source, resetIds, action) {
+async function writeRoomChange(id, source, resetIds, action, recalculate = true) {
   const outcome = await writeRoomChanges(new Map([[id, source]]), resetIds, action);
-  await refreshAfterWrite(id);
+  await refreshAfterWrite(id, recalculate);
   if (outcome.failure) {
     throw new Error(`${outcome.failure} The leaderboard was recalculated from the remaining published results; leftover predictions stay pending and score nothing until their rooms are reset again.`);
   }
@@ -597,7 +597,7 @@ $("saveRosterImportBtn").addEventListener("click", () => persist(async () => {
     ...withoutResults(roomsCache[id]), ...plan.rosters[id],
     name: configFor(id).name, stage: configFor(id).stage,
     stageId: configFor(id).stage, formatVersion: 2,
-    status: roomsCache[id].status === "live" ? "live" : "upcoming"
+    status: roomsCache[id].status === "completed" ? "completed" : roomsCache[id].status === "live" ? "live" : "upcoming"
   }]));
   const action = `Importing the roster for groups ${plan.changedRoomIds.join(", ")}`;
   plan.changedRoomIds.forEach(id => assertNoPublishedDependents(id, action));
@@ -617,7 +617,7 @@ $("saveRosterImportBtn").addEventListener("click", () => persist(async () => {
 $("saveRoomBtn").addEventListener("click", () => persist(async () => {
   const previous = await freshEditor();
   requireInitialized();
-  if (completed(previous)) throw new Error("Reopen this room explicitly before editing its roster or status.");
+  if (published(previous)) throw new Error("Reopen this room explicitly before editing its roster or status.");
   const roster = readRoster();
   const changed = !same(previous.players, roster.players) || !same(previous.playerDetails || {}, roster.playerDetails);
   const source = {
@@ -626,8 +626,8 @@ $("saveRoomBtn").addEventListener("click", () => persist(async () => {
     stageId: configFor(editorId).stage, formatVersion: 2, status: $("roomStatus").value
   };
   if (!changed) {
-    await writeRoomChange(editorId, source, [], null);
-    notify("Room status saved. Scores are unchanged; use Recalculate leaderboard to refresh public usernames.", "success");
+    await writeRoomChange(editorId, source, [], null, false);
+    notify("Room status saved. Results, bracket and scores are unchanged; use Publish Results to confirm official results. Use Recalculate leaderboard to refresh public names.", "success");
     return;
   }
   const action = `Saving roster changes for ${configFor(editorId).name}`;
@@ -646,7 +646,7 @@ $("publishRoomBtn").addEventListener("click", () => persist(async () => {
   const config = configFor(editorId);
   const roster = readRoster();
   if (!same(room.players, roster.players) || !same(room.playerDetails || {}, roster.playerDetails)) {
-    throw new Error("Save participant details before publishing results. Completed rosters must be reopened first.");
+    throw new Error("Save participant details before publishing results. Published rosters must be reopened first.");
   }
   if (!roomReady(editorId, room)) throw new Error("This room does not have enough confirmed, distinct participants.");
   let result;
@@ -682,7 +682,7 @@ $("publishRoomBtn").addEventListener("click", () => persist(async () => {
 $("unpublishRoomBtn").addEventListener("click", () => persist(async () => {
   const room = await freshEditor();
   requireInitialized();
-  if (!completed(room)) throw new Error("This room is already open.");
+  if (!published(room)) throw new Error("This room has no published results to reopen. Use Save Room to change its status.");
   const action = `Reopening ${configFor(editorId).name}`;
   assertNoPublishedDependents(editorId, action);
   const source = withoutResults(room);
@@ -752,7 +752,7 @@ $("initializeTournamentBtn").addEventListener("click", () => persist(async () =>
 
 function clearUsernameModeration() {
   moderationProfiles = new Map();
-  $("moderationUid").innerHTML = '<option value="">Load usernames first</option>';
+  $("moderationUid").innerHTML = '<option value="">Load full names first</option>';
   $("resetUsernameBtn").disabled = true;
   $("moderationMessage").textContent = "";
 }
@@ -760,7 +760,7 @@ function clearUsernameModeration() {
 function renderUsernameModeration(selected = "") {
   const profiles = [...moderationProfiles].sort((left, right) =>
     left[1].localeCompare(right[1]) || left[0].localeCompare(right[0]));
-  $("moderationUid").innerHTML = '<option value="">Select a public username</option>' +
+  $("moderationUid").innerHTML = '<option value="">Select a full name</option>' +
     profiles.map(([uid, username]) =>
       `<option value="${escapeHTML(uid)}">${escapeHTML(username)} · ${escapeHTML(uid)}</option>`).join("");
   $("moderationUid").value = moderationProfiles.has(selected) ? selected : "";
@@ -773,28 +773,28 @@ $("moderationUid").addEventListener("change", () => {
 
 $("loadUsernamesBtn").addEventListener("click", () => persist(async () => {
   const epoch = adminAuthEpoch;
-  showMessage($("moderationMessage"), "Loading public usernames…");
+  showMessage($("moderationMessage"), "Loading full names…");
   const snapshot = await getDocs(collection(db, "profiles"));
   if (epoch !== adminAuthEpoch || !authorized) return;
   moderationProfiles = new Map(snapshot.docs.map(item => [item.id, publicUsername(item.data().username)]));
   renderUsernameModeration();
   showMessage($("moderationMessage"), moderationProfiles.size
-    ? "Select a username to reset. UIDs distinguish accounts with duplicate names."
-    : "No saved usernames yet.");
+    ? "Select a full name to reset. UIDs distinguish accounts with duplicate names."
+    : "No saved full names yet.");
 }));
 
 $("resetUsernameBtn").addEventListener("click", () => persist(async () => {
   const uid = $("moderationUid").value;
   if (!moderationProfiles.has(uid)) return;
   if (!confirm(`Reset ${moderationProfiles.get(uid)} (${uid}) to ${DEFAULT_USERNAME}?\n\n` +
-    "Predictions, points and Lucky Draw tickets will not change. The user may choose a new name later.")) return;
+    "Predictions, points and Lucky Draw entries will not change. The user may choose a new name later.")) return;
   const epoch = adminAuthEpoch;
   await setDoc(doc(db, "profiles", uid), { username: DEFAULT_USERNAME, updatedAt: serverTimestamp() });
   if (epoch !== adminAuthEpoch || !authorized) return;
   moderationProfiles.set(uid, DEFAULT_USERNAME);
   renderUsernameModeration(uid);
   showMessage($("moderationMessage"),
-    "Username reset. It will appear on the leaderboard after the next successful recalculation.", "success");
+    "Full name reset. It will appear on the leaderboard after the next successful recalculation.", "success");
 }));
 
 async function readLeaderboardUsernames(uids) {
@@ -834,7 +834,7 @@ async function recalculateLeaderboard() {
 
 $("recalculateLeaderboardBtn").addEventListener("click", () => persist(async () => {
   const result = await recalculateLeaderboard();
-  notify(`Leaderboard updated: ${result.written} written, ${result.deleted} deleted. Refresh Lucky Draw tickets before spinning.`, "success");
+  notify(`Leaderboard updated: ${result.written} written, ${result.deleted} deleted. Refresh Lucky Draw entries before spinning.`, "success");
 }));
 
 async function loadSettings() {

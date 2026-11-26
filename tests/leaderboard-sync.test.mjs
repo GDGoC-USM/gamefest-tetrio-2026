@@ -77,14 +77,29 @@ test('obsolete document IDs are deleted, including mismatched stored UID values'
   assert.deepEqual(planLeaderboardChanges([], existing), { upserts: [], deletes: ['a', 'obsolete'] });
 });
 
-test('only valid public usernames can supply names, never predictions or profile objects', () => {
+test('only valid public full names can supply names, never predictions or profile objects', () => {
   for (const value of ['viewer@example.com', '<img src=x onerror=alert(1)>', { username: 'Alice', email: 'private@example.com' }, null, 42, ' Alice', 'ab']) {
     const rows = rankLeaderboardRows([score('a')], new Map([['a', value]]));
     assert.equal(rows[0].displayName, 'Participant');
     assert.deepEqual(Object.keys(rows[0]), ['uid', 'displayName', 'correct', 'points', 'pending', 'rank']);
   }
   assert.equal(rankLeaderboardRows([score('a')])[0].displayName, 'Participant');
-  assert.equal(rankLeaderboardRows([score('a')], new Map([['a', 'Valid_User-9']]))[0].displayName, 'Valid_User-9');
+  for (const name of ['Valid_User-9', 'José O’Neill', '李 小龍', 'محمد أحمد', '𐐀'.repeat(80)]) {
+    assert.equal(rankLeaderboardRows([score('a')], new Map([['a', name]]))[0].displayName, name);
+  }
+});
+
+test('full-name changes replace only the named row without changing UID or score totals', () => {
+  const scores = Object.freeze([Object.freeze(score('a', 3, 2)), Object.freeze(score('b', 1, 4))]);
+  const before = rankLeaderboardRows(scores, new Map([['a', 'Existing Name'], ['b', 'Preserved Name']]));
+  const after = rankLeaderboardRows(scores, new Map([['a', 'José O’Neill'], ['b', 'Preserved Name']]));
+  const plan = planLeaderboardChanges(after, storedRows(before));
+  assert.deepEqual(ids(plan), ['a']);
+  assert.deepEqual(plan.deletes, []);
+  assert.deepEqual(plan.upserts[0], { uid: 'a', displayName: 'José O’Neill', correct: 3, points: 3, pending: 2, rank: 1 });
+  assert.deepEqual(planLeaderboardChanges(after, storedRows(after)), { upserts: [], deletes: [] });
+  assert.equal(scores[0].displayName, 'Stale prediction name');
+  assert.equal(scores[0].points, 999);
 });
 
 test('legacy extra fields and every missing schema field require full replacement', () => {

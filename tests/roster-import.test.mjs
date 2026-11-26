@@ -83,6 +83,18 @@ test('published rosters reject changes, while identical reimports leave results 
   assert.equal(rooms.A.resultsPublished, true);
 });
 
+test('ended unpublished groups accept roster corrections without publishing or reopening', () => {
+  const rooms = emptyRooms();
+  putPlayer(rooms, 'A', 'StableExample', '0001', 'ExampleOne');
+  rooms.A.status = 'completed';
+  const original = structuredClone(rooms);
+  const plan = prepareRosterImport(parse('A,0001,CorrectedExample'), rooms);
+  assert.deepEqual(plan.changedRoomIds, ['A']);
+  assert.equal(plan.rosters.A.players[0], 'StableExample');
+  assert.equal(plan.rosters.A.playerDetails.StableExample.username, 'CorrectedExample');
+  assert.deepEqual(rooms, original);
+});
+
 test('existing identity conflicts cannot be hidden by partial imports or reassignment', () => {
   const rooms = emptyRooms();
   putPlayer(rooms, 'B', 'ExistingExample', '0001', 'ExampleOne');

@@ -81,7 +81,7 @@ function sourceOf(feeder) {
   };
 }
 function confirmedKey(source, room) {
-  if (!room?.resultsPublished) return "";
+  if (room?.resultsPublished !== true) return "";
   if (source.index !== undefined) {
     const qualifiers = room.qualifiers;
     if (!Array.isArray(qualifiers) || qualifiers.length !== 2 || new Set(qualifiers).size !== 2 ||
@@ -95,6 +95,7 @@ function confirmedKey(source, room) {
   } catch { return ""; }
 }
 export function deriveRooms(rooms) {
+  // Feeder scaffolds are not saved match state; only explicitly published results advance players.
   const derived = {};
   for (const config of ROOM_CONFIG.filter(config => config.feeders)) {
     const playerDetails = {};
@@ -147,7 +148,7 @@ function samePlayerKeys(room, players) {
 // Only feeder rooms whose confirmed players change are reset, so a result that keeps
 // the same progression leaves downstream results and audience predictions intact.
 export function dependentResets(rooms, sources) {
-  const changes = sources instanceof Map ? Object.fromEntries(sources) : sources;
+  const changes = typeof sources?.[Symbol.iterator] === "function" ? Object.fromEntries(sources) : sources;
   const working = { ...rooms, ...changes };
   const sourceIds = new Set(Object.keys(changes));
   const reset = new Set();
@@ -178,7 +179,7 @@ export function scorePrediction(prediction, rooms) {
   if (!config || config.kind === "ffa") return { correct: 0, pending: 0 };
   const keys = predictedKeys(prediction, config);
   const room = rooms[config.id];
-  if (!room?.resultsPublished || (config.kind === "series" && room.formatVersion !== 2)) return { correct: 0, pending: config.kind === "series" ? Math.min(1, keys.length) : keys.length };
+  if (room?.resultsPublished !== true || (config.kind === "series" && room.formatVersion !== 2)) return { correct: 0, pending: config.kind === "series" ? Math.min(1, keys.length) : keys.length };
   if (config.kind === "group") {
     try { validateGroupResult(room, room.qualifiers); } catch { return { correct: 0, pending: keys.length }; }
     return { correct: keys.filter(key => room.qualifiers.includes(key)).length, pending: 0 };
