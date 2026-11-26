@@ -6,12 +6,14 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
+}
 @font-face {
   font-family: 'Google Sans';
   src: url('../fonts/GoogleSans-Medium.ttf') format('truetype');
   font-style: normal;
   font-weight: 500;
   font-display: swap;
+}
 @font-face {
   font-family: 'Google Sans';
   src: url('../fonts/GoogleSans-Bold.ttf') format('truetype');
@@ -37,7 +39,7 @@
   font-family: 'Google Sans';
   src: url('../fonts/GoogleSans-BoldItalic.ttf') format('truetype');
   font-style: italic;
-  font-weight: 700 900;
+  font-weight: 700;
   font-display: swap;
 }
 
@@ -2427,7 +2429,7 @@ footer {
 }
 
 .room-prediction-players .prediction-player.selected::after {
-  content: "âœ“ SELECTED";
+  content: "Ã¢Å“â€œ SELECTED";
   display: inline-block;
   margin-top: 5px;
   padding: 4px 8px;
@@ -2456,7 +2458,7 @@ footer {
 
 
 /* =========================================================
-   LOGO ROUNDING FIX â€” STRUCTURAL CLIPPING
+   LOGO ROUNDING FIX Ã¢â‚¬â€ STRUCTURAL CLIPPING
    The square source images are clipped in square wrappers.
    Outer slots retain the original layout widths and spacing.
    Only header/footer logo presentation is affected.
