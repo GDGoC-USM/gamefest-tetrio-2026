@@ -6,6 +6,7 @@ export function initPublicAuth({ onUserChanged = () => {}, initializeProfile = t
   const button = document.getElementById("authBtn");
   const status = document.getElementById("authStatus");
   let restored = false;
+  let restorationFailed = false;
   let user = null;
   let busy = "";
   let error = "";
@@ -13,17 +14,24 @@ export function initPublicAuth({ onUserChanged = () => {}, initializeProfile = t
   let epoch = 0;
 
   function renderAuth() {
-    button.disabled = !restored || Boolean(busy);
-    button.setAttribute("aria-busy", String(!restored || Boolean(busy)));
-    button.textContent = !restored ? "RESTORING SESSION…" : busy || (user ? "SIGN OUT" : "SIGN IN WITH GOOGLE");
-    status.textContent = error || (!restored ? "Restoring your session…" : busy
+    const restoring = !restored && !restorationFailed;
+    button.disabled = restoring || Boolean(busy);
+    button.setAttribute("aria-busy", String(restoring || Boolean(busy)));
+    button.textContent = restorationFailed ? "RELOAD TO RETRY"
+      : restoring ? "RESTORING SESSION…" : busy || (user ? "SIGN OUT" : "SIGN IN WITH GOOGLE");
+    status.textContent = error || (restoring ? "Restoring your session…" : busy
       ? busy === "SIGNING OUT…" ? "Signing out…" : "Opening Google sign-in…"
       : user ? `Signed in as ${publicUsername(user.displayName)}.${profileMessage}`
         : "Sign in with Google to save your predictions.");
   }
 
   button.addEventListener("click", async () => {
-    if (!restored || busy) return;
+    if (busy) return;
+    if (restorationFailed) {
+      location.reload();
+      return;
+    }
+    if (!restored) return;
     const actionEpoch = epoch;
     busy = user ? "SIGNING OUT…" : "SIGNING IN…";
     error = "";
@@ -46,6 +54,7 @@ export function initPublicAuth({ onUserChanged = () => {}, initializeProfile = t
   return onAuthStateChanged(auth, nextUser => {
     const currentEpoch = ++epoch;
     restored = true;
+    restorationFailed = false;
     user = nextUser;
     error = "";
     profileMessage = "";
@@ -67,9 +76,11 @@ export function initPublicAuth({ onUserChanged = () => {}, initializeProfile = t
   }, () => {
     ++epoch;
     restored = false;
+    restorationFailed = true;
     user = null;
     busy = "";
-    error = "Unable to restore your session. Allow browser storage and refresh to try again.";
+    profileMessage = "";
+    error = "Sign-in status could not be verified. Allow browser storage, then reload to retry.";
     onUserChanged(null);
     renderAuth();
   });

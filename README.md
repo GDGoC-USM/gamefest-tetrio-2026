@@ -204,6 +204,8 @@ The supplied Firestore rules restrict administrative writes and prevent browser 
 
 Home, Matches, Predict and Leaderboard share `auth-ui.js`: Home-reference header buttons, signed-in indicators, explicit accessible session restoration and busy/error states. Google popup sign-in and the SDK's existing default persistence are unchanged; same-origin restoration does not imply session sharing across preview/deployed origins or browsers with blocked storage. Sign out before choosing another Google account. Predict clears profile, saved picks, drafts and pending-operation UI on auth changes and guards stale completions by account/epoch. A denied Admin visit keeps the audience session signed in while the dashboard remains hidden and server-enforced permissions remain unchanged; explicitly sign out to switch administrator accounts. Profile failures do not sign users out; Predict offers a retry.
 
+If session restoration fails, the shared control stops announcing a busy restoration and offers **Reload to retry**. The status explicitly says that sign-in could not be verified; it does not claim the account is signed out. Allow browser storage before reloading. Firebase's persistence setting is unchanged, and blocked storage may prevent sign-in or leave only a page-local session; navigation/refresh persistence is not promised in that environment.
+
 For an approved production release, a maintainer must confirm the existing project's providers and authorized deployed domains; this audit did not inspect/change them. Firestore permissions, not hidden navigation or a known email, enforce admin access. See [AGENTS.md](AGENTS.md#firestore-data-and-permissions) for collection schemas/access boundaries.
 
 ### Import a participant roster
