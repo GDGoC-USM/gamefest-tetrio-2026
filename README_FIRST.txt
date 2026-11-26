@@ -138,6 +138,11 @@ REOPEN / UNPUBLISH RESULTS
 - Publish corrected results and regenerate the affected bracket from confirmed feeders.
 - A group affects its QFs, dependent SFs, FINAL, THIRD and PLACEMENT. A QF affects
   its SF, FINAL, THIRD and PLACEMENT. An SF affects FINAL and THIRD.
+- Reopen downstream rooms first. If any transitive dependent room still has published
+  results, publishing, correcting, reopening or re-rostering the upstream room is
+  blocked and nothing is changed. The dashboard lists the rooms to reopen, deepest
+  round first (FINAL, THIRD and PLACEMENT, then semi-finals, then quarter-finals,
+  then groups).
 
 H. LEADERBOARD SCORING
 - Score only saved predictions against published, resolved results.

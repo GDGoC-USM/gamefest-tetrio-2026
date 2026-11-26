@@ -122,6 +122,16 @@ export function dependentRoomIds(id) {
   visit(id);
   return ROOM_CONFIG.filter(config => found.has(config.id)).map(config => config.id);
 }
+export const hasPublishedResults = room =>
+  room?.resultsPublished === true || room?.status === "completed";
+// Published downstream rooms must be reopened before their feeder changes.
+// Reverse configuration order is a valid deepest-first sequence for that task.
+export function publishedDependentIds(id, rooms) {
+  const position = new Map(ROOM_CONFIG.map((config, index) => [config.id, index]));
+  return dependentRoomIds(id)
+    .filter(dependentId => hasPublishedResults(rooms[dependentId]))
+    .sort((left, right) => position.get(right) - position.get(left));
+}
 function predictedKeys(prediction, config) {
   if (config.kind === "group") return [...new Set((prediction.selectedPlayers || []).filter(isPlayer))].slice(0, 2);
   // Historical final podiums contribute only their champion pick to the new winner result.

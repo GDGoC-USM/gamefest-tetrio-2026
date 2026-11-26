@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ROOM_CONFIG, deriveRooms, dependentRoomIds, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
+import { ROOM_CONFIG, deriveRooms, dependentRoomIds, publishedDependentIds, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
 
 function sample() {
   const rooms = {};
@@ -109,4 +109,20 @@ test('reopening traverses winner and loser dependencies without unrelated matche
   assert.deepEqual(dependentRoomIds('QF1'), ['SF1', 'FINAL', 'THIRD', 'PLACEMENT']);
   assert.deepEqual(dependentRoomIds('B'), ['QF1', 'QF3', 'SF1', 'SF2', 'FINAL', 'THIRD', 'PLACEMENT']);
   assert.deepEqual(dependentRoomIds('PLACEMENT'), []);
+});
+
+test('published downstream rooms block reopening and are listed deepest first', () => {
+  const rooms = sample();
+  assert.deepEqual(publishedDependentIds('PLACEMENT', rooms), []);
+  assert.deepEqual(publishedDependentIds('A', rooms),
+    ['THIRD', 'FINAL', 'SF2', 'SF1', 'QF3', 'QF1']);
+  // Only published (or legacy completed) downstream rooms block; unrelated rooms never do.
+  for (const id of ['QF1', 'QF3', 'SF1', 'SF2', 'FINAL', 'THIRD', 'PLACEMENT']) {
+    rooms[id] = { ...rooms[id], resultsPublished: false, status: 'upcoming' };
+  }
+  assert.deepEqual(publishedDependentIds('A', rooms), []);
+  rooms.QF1 = { ...rooms.QF1, status: 'completed' };
+  rooms.PLACEMENT = { ...rooms.PLACEMENT, resultsPublished: true };
+  assert.deepEqual(publishedDependentIds('A', rooms), ['PLACEMENT', 'QF1']);
+  assert.deepEqual(publishedDependentIds('C', rooms), ['PLACEMENT', 'QF4', 'QF2']);
 });
