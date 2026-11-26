@@ -18,7 +18,7 @@
   font-family: 'Google Sans';
   src: url('../fonts/GoogleSans-Bold.ttf') format('truetype');
   font-style: normal;
-  font-weight: 700;
+  font-weight: 700 900;
   font-display: swap;
 }
 @font-face {
@@ -39,7 +39,7 @@
   font-family: 'Google Sans';
   src: url('../fonts/GoogleSans-BoldItalic.ttf') format('truetype');
   font-style: italic;
-  font-weight: 700;
+  font-weight: 700 900;
   font-display: swap;
 }
 
@@ -68,7 +68,7 @@
   font-family: 'Google Sans Mono';
   src: url('../fonts/GoogleSansMono-Bold.ttf') format('truetype');
   font-style: normal;
-  font-weight: 700;
+  font-weight: 700 900;
   font-display: swap;
 }
 @font-face {
@@ -96,7 +96,7 @@
   font-family: 'Google Sans Mono';
   src: url('../fonts/GoogleSansMono-BoldItalic.ttf') format('truetype');
   font-style: italic;
-  font-weight: 700;
+  font-weight: 700 900;
   font-display: swap;
 }
 
@@ -133,6 +133,11 @@ body {
     var(--bg);
   font-family: 'Google Sans', sans-serif;
   min-height: 100vh;
+}
+
+/* Keep every public-page heading on the locally hosted Google Sans family. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Google Sans', sans-serif;
 }
 
 a {
