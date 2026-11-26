@@ -1,4 +1,6 @@
+
 @charset "UTF-8";
+
 /* ==========================================
    LUCKY DRAW
 ========================================== */
@@ -29,7 +31,9 @@
   font-size: 34px;
 }
 
-/* MAIN WHEEL CARD */
+/* ==========================================
+   MAIN WHEEL CARD
+========================================== */
 
 .luckydraw-main {
   text-align: center;
@@ -52,7 +56,9 @@
   font-size: 13px;
 }
 
-/* WHEEL */
+/* ==========================================
+   WHEEL
+========================================== */
 
 .luckydraw-wheel-area {
   position: relative;
@@ -82,11 +88,11 @@
     0 0 35px #8a4bd855,
     inset 0 0 20px #0008;
   transition: transform 5.2s cubic-bezier(.12,.78,.16,1);
+  overflow: hidden;
 }
 
-
 /* ==========================================
-   PARTICIPANT NAMES ON WHEEL
+   RADIAL PARTICIPANT LABELS
 ========================================== */
 
 .ld-wheel-label {
@@ -96,12 +102,12 @@
   top: 50%;
   left: 50%;
 
-  width: 76px;
+  width: 105px;
+  max-width: 105px;
 
   color: #ffffff;
 
   font-family: 'Google Sans', sans-serif;
-
   font-size: 10px;
   font-weight: 700;
 
@@ -110,9 +116,9 @@
 
   line-height: 1.1;
 
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 
   text-shadow:
     1px 1px 3px #000000,
@@ -122,26 +128,31 @@
   user-select: none;
 }
 
-/* Keep the centre of the wheel above the names. */
-
-.luckydraw-wheel-center {
-  z-index: 2;
-}
+/* ==========================================
+   WHEEL CENTRE
+========================================== */
 
 .luckydraw-wheel-center {
   position: absolute;
   top: 50%;
   left: 50%;
+
+  z-index: 2;
+
   width: 100px;
   height: 100px;
+
   transform: translate(-50%, -50%);
+
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+
   background: #17142b;
   border: 5px solid #d4b1ff;
   border-radius: 50%;
+
   box-shadow: 0 4px 18px #0008;
 }
 
@@ -158,15 +169,19 @@
   font-size: 22px;
 }
 
-/* WINNER DISPLAY */
+/* ==========================================
+   WINNER DISPLAY
+========================================== */
 
 .luckydraw-winner {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+
   margin: 20px auto;
   padding: 22px;
+
   background: #17142b;
   border: 1px solid #a66be866;
   border-radius: 12px;
@@ -184,6 +199,7 @@
   font-family: 'Google Sans', sans-serif;
   font-size: clamp(25px, 5vw, 38px);
   text-transform: uppercase;
+
   max-width: 100%;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -196,7 +212,9 @@
   overflow-wrap: anywhere;
 }
 
-/* ACTION BUTTONS */
+/* ==========================================
+   ACTION BUTTONS
+========================================== */
 
 .luckydraw-actions {
   display: flex;
@@ -224,7 +242,129 @@
   cursor: wait;
 }
 
-/* PARTICIPANTS */
+/* ==========================================
+   PARTICIPANT MANAGEMENT
+========================================== */
+
+.ld-add-participant {
+  margin-top: 12px;
+}
+
+.ld-add-participant h4 {
+  margin: 0 0 8px;
+  color: #fff;
+  font-family: 'Google Sans', sans-serif;
+  font-size: 16px;
+}
+
+.ld-add-participant p {
+  margin-bottom: 18px;
+  font-size: 12px;
+}
+
+.ld-add-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.ld-add-form label,
+.ld-editor-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ld-add-form input,
+.ld-editor-fields input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+
+  padding: 11px 12px;
+
+  color: #fff;
+  background: #17142b;
+
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+
+  outline: none;
+}
+
+.ld-add-form input:focus,
+.ld-editor-fields input:focus {
+  border-color: #a66be8;
+  box-shadow: 0 0 0 2px #a66be822;
+}
+
+.ld-add-form button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.ld-editor-divider {
+  margin: 24px 0;
+  border: 0;
+  border-top: 1px solid var(--admin-line);
+}
+
+/* ==========================================
+   EDIT PARTICIPANT LIST
+========================================== */
+
+.ld-editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+
+  padding: 16px 0;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.ld-editor-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ld-editor-fields label span {
+  color: var(--admin-muted);
+}
+
+.ld-editor-fields input {
+  font-size: 12px;
+}
+
+.ld-remove-btn {
+  min-width: 90px;
+  min-height: 38px;
+  padding: 8px 12px;
+
+  color: #ff8ba4;
+  border-color: #d94c7055;
+}
+
+.ld-remove-btn:hover {
+  background: #d94c7018;
+}
+
+#ldResetEditsBtn {
+  margin-top: 22px;
+  color: #d5b0ff;
+  border-color: #a66be866;
+}
+
+/* ==========================================
+   PARTICIPANTS
+========================================== */
 
 .luckydraw-section-title {
   display: flex;
@@ -287,7 +427,9 @@
   border-radius: 20px;
 }
 
-/* WINNER HISTORY */
+/* ==========================================
+   WINNER HISTORY
+========================================== */
 
 .ld-history-row {
   display: flex;
@@ -302,9 +444,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
+
   width: 32px;
   height: 32px;
   flex: 0 0 32px;
+
   border-radius: 50%;
   background: #8a4bd833;
   color: #d5b0ff;
@@ -339,7 +483,9 @@
   white-space: nowrap;
 }
 
-/* MOBILE */
+/* ==========================================
+   MOBILE
+========================================== */
 
 @media (max-width: 700px) {
 
@@ -361,8 +507,50 @@
     flex-direction: column;
   }
 
+  .ld-add-form {
+    grid-template-columns: 1fr;
+  }
+
+  .ld-add-form button {
+    width: 100%;
+  }
+
+  .ld-editor-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .ld-editor-fields {
+    grid-template-columns: minmax(0, 1fr) 90px;
+  }
+
+  .ld-remove-btn {
+    width: 100%;
+  }
+
   .ld-history-row {
     gap: 9px;
   }
 
+}
+
+.ld-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ld-editor-actions button {
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .ld-editor-actions {
+    width: 100%;
+  }
+
+  .ld-editor-actions button {
+    flex: 1;
+  }
 }
