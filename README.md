@@ -44,6 +44,7 @@ There is no `package.json` or build step. Pure regression scenarios use Node's b
         ├── predict.js          Prediction selection, saving, and room updates
         ├── usernames.js        Public username validation and safe fallback
         ├── leaderboard.js      Public leaderboard display
+        ├── leaderboard-sync.js Pure ranking and changed-row planning
         ├── admin.js            Room management, bracket generation, and scoring
         └── luckydraw.js        Ticket selection and winner history
 ```
@@ -91,6 +92,32 @@ The public `leaderboard/<uid>` schema is exactly:
 
 Public equal-score rows retain shared ranks and alphabetical name ordering, then UID ordering. Renaming may change ordering within ties, but never scores or ticket ownership. Recalculation replaces documents without merging, removing stale names and unexpected fields. Hiding an invalid name in the UI does **not** remove the underlying publicly readable document fields; production inspection or repair needs separate authorisation. No automatic production cleanup is provided.
 
+
+## Leaderboard recalculation and Spark usage
+
+Use **Admin → Prediction Settings → Recalculate leaderboard** to intentionally refresh names or repair stale data. Signing into the dashboard no longer recalculates. Publishing, correcting or reopening results, roster changes and format initialisation retain their automatic recalculation. Stage toggles, room locks and status-only saves do not recalculate. Resubmitting an unchanged published result still performs an intentional repair/recalculation without resetting predictions.
+
+Each recalculation reads predictions, rooms and the existing leaderboard once. It scores/deduplicates predictions, queries profiles only for distinct participating UIDs in document-ID groups of at most 30, and reuses one in-memory username map. It does not read a profile per prediction or attach any profile listener.
+
+The existing leaderboard snapshot is compared against the exact public schema and all persisted ranking values. New, changed, malformed or extra-field rows are fully replaced; obsolete participants are deleted. An unchanged row retains its `updatedAt`. An unchanged recalculation commits no batches. Write/delete batches remain capped at 450 operations; failures surface through the existing dashboard error path. If some batches committed before a later failure, explicitly recalculate again: totals remain absolute and repeatable.
+
+Stored ranks preserve descending correct counts, alphabetical names and stable ordering for identical names. Public ties still share a rank, with UID ordering after name comparison. A rename can legitimately move several stored ranks within a tie. Username changes never change prediction selections or UID-based ticket ownership. Reopening still clears results and dependent predictions through the existing workflow; recalculation simply reflects the remaining published results.
+
+Illustrative estimates below assume 150 leaderboard rows, 150 connected leaderboard viewers and 150 participating profiles. They are **not production usage or emulator billing measurements**:
+
+| Per recalculation | Before optimisation | After optimisation |
+| --- | ---: | ---: |
+| Additional profile document reads | 0 | 150 |
+| Writes when all rows are unchanged | 150 | 0 |
+| Update-driven viewer reads when unchanged | 22,500 | 0 |
+| Writes when exactly five persisted rows change | 150 | 5 |
+| Update-driven viewer reads for those five changes | 22,500 | 750 |
+
+For `P` prediction documents, `R` rooms, `L` existing leaderboard rows and `F` returned profiles, administrator document reads are approximately `P + R + L + F`, before query minimums and security-rule lookups. An empty profile query still costs at least one read. Up to 150 UIDs require at most five profile query requests, not one request per prediction. Owner profile loading costs one read per signed-in page/session load; each successful save/reset costs one write. Moderation list loads are explicit additional reads.
+
+Initial public leaderboard subscriptions still read all rows: 150 viewers × 150 rows is approximately 22,500 initial reads. Reconnects can repeat that cost, and genuine score/rank changes can still affect many or all rows. Room/prediction listeners and Lucky Draw refreshes also consume reads. These changes reduce redundant broadcasts; they do not guarantee the event stays within the 50,000-read daily allowance.
+
+See [Firestore listener billing](https://firebase.google.com/docs/firestore/pricing#listening_to_query_results) and [free quotas](https://firebase.google.com/docs/firestore/quotas#free-quota). Run the synthetic tests below for measured application-operation counts; those counts are not Firebase production billing.
 
 ## Getting started
 
@@ -258,8 +285,8 @@ Java 21 is required. The test skips without `FIRESTORE_EMULATOR_HOST`, rejects n
 Username validation and privacy regressions:
 
 ```sh
-node --test tests/usernames.test.mjs tests/tournament.test.mjs
-firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs"
+node --test tests/usernames.test.mjs tests/tournament.test.mjs tests/leaderboard-sync.test.mjs
+firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
 ```
 
 The username unit and rule tests share the same validation cases. Rule tests use unique disposable demo projects, reject non-loopback hosts, and cover owner/admin access, forbidden listing, moderation, field allowlists, public leaderboard reads and private predictions. Without `FIRESTORE_EMULATOR_HOST`, rule tests explicitly skip; a skip or static inspection does not prove runtime enforcement. If Java 21 or later is unavailable, run the unit command and report the emulator tests as unexecuted.

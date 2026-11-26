@@ -10,6 +10,7 @@ import {
 } from "./tournament.js";
 import { parseRosterCSV, prepareRosterImport } from "./roster-import.js";
 import { DEFAULT_USERNAME, publicUsername } from "./usernames.js";
+import { rankLeaderboardRows, planLeaderboardChanges } from "./leaderboard-sync.js";
 
 const $ = id => document.getElementById(id);
 const adminLogin = $("adminLogin");
@@ -144,9 +145,7 @@ onAuthStateChanged(auth, async user => {
       await Promise.all([fetchRooms(), loadSettings()]);
       if (epoch !== adminAuthEpoch || !authorized) return;
       renderRooms();
-      await recalculateLeaderboard();
-      if (epoch !== adminAuthEpoch || !authorized) return;
-      notify("Admin access verified. Rooms are unchanged; leaderboard recalculated.", "success");
+      notify("Admin access verified. Rooms and leaderboard are unchanged. Use Prediction Settings → Recalculate leaderboard when needed.", "success");
     });
   } catch (error) {
     if (epoch !== adminAuthEpoch) return;
@@ -462,14 +461,15 @@ async function writeRoomChanges(sources, resetIds) {
 
 async function writeRoomChange(id, source, resetDependents) {
   const deleted = await writeRoomChanges(new Map([[id, source]]), resetDependents ? dependentRoomIds(id) : []);
-  await refreshAfterWrite(id);
+  await refreshAfterWrite(id, resetDependents);
   return deleted;
 }
 
-async function refreshAfterWrite(id) {
+async function refreshAfterWrite(id, recalculate = true) {
   await fetchRooms();
   renderRooms();
   if (id) loadRoomEditor(id);
+  if (!recalculate) return;
   try {
     await recalculateLeaderboard();
   } catch (error) {
@@ -570,7 +570,8 @@ $("saveRoomBtn").addEventListener("click", () => persist(async () => {
     stageId: configFor(editorId).stage, formatVersion: 2, status: $("roomStatus").value
   };
   await writeRoomChange(editorId, source, changed);
-  notify("Room saved. Dependent feeders and leaderboard are up to date.", "success");
+  notify(changed ? "Room saved. Dependent feeders and leaderboard are up to date."
+    : "Room status saved. Scores are unchanged; use Recalculate leaderboard to refresh public usernames.", "success");
 }));
 
 $("publishRoomBtn").addEventListener("click", () => persist(async () => {
@@ -742,29 +743,27 @@ async function recalculateLeaderboard() {
   ]);
   const rooms = Object.fromEntries(roomSnapshot.docs.map(item => [item.id, item.data()]));
   const predictions = predictionSnapshot.docs.map(item => ({ ...item.data(), id: item.id }));
-  const rows = calculateLeaderboard(predictions, rooms);
-  const usernames = await readLeaderboardUsernames(rows.map(row => row.uid));
-  rows.forEach(row => { row.displayName = usernames.get(row.uid) || DEFAULT_USERNAME; });
-  rows.sort((left, right) => right.correct - left.correct || left.displayName.localeCompare(right.displayName));
-  const retained = new Set(rows.map(row => row.uid));
-  // Ranking writes are absolute and independently repeatable; bracket mutations above are one atomic batch.
-  const operations = rows.map((row, index) => batch => batch.set(doc(db, "leaderboard", row.uid), {
-    ...row, points: row.correct, rank: index + 1, updatedAt: serverTimestamp()
+  const scores = calculateLeaderboard(predictions, rooms);
+  const usernames = await readLeaderboardUsernames(scores.map(row => row.uid));
+  const rows = rankLeaderboardRows(scores, usernames);
+  const existing = new Map(leaderboardSnapshot.docs.map(item => [item.id, item.data()]));
+  const changes = planLeaderboardChanges(rows, existing);
+  // Full replacement repairs obsolete fields; unchanged rows retain their timestamps.
+  const operations = changes.upserts.map(row => batch => batch.set(doc(db, "leaderboard", row.uid), {
+    ...row, updatedAt: serverTimestamp()
   }));
-  leaderboardSnapshot.docs.forEach(item => {
-    if (!retained.has(item.id)) operations.push(batch => batch.delete(item.ref));
-  });
+  changes.deletes.forEach(uid => operations.push(batch => batch.delete(doc(db, "leaderboard", uid))));
   for (let index = 0; index < operations.length; index += 450) {
     const batch = writeBatch(db);
     operations.slice(index, index + 450).forEach(operation => operation(batch));
     await batch.commit();
   }
-  return rows;
+  return { written: changes.upserts.length, deleted: changes.deletes.length };
 }
 
 $("recalculateLeaderboardBtn").addEventListener("click", () => persist(async () => {
-  await recalculateLeaderboard();
-  notify("Leaderboard replaced with correct-pick totals. Refresh Lucky Draw tickets before spinning.", "success");
+  const result = await recalculateLeaderboard();
+  notify(`Leaderboard updated: ${result.written} written, ${result.deleted} deleted. Refresh Lucky Draw tickets before spinning.`, "success");
 }));
 
 async function loadSettings() {

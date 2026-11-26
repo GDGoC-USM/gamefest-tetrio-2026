@@ -154,6 +154,17 @@ H. LEADERBOARD SCORING
 - Leaderboard replacement removes unexpected public fields. Rendering an invalid
   name as Participant does not remove the stored public data; any production
   inspection or recalculation for cleanup requires separate authorisation.
+- Signing into admin does not recalculate. Use Admin > Prediction Settings >
+  Recalculate leaderboard to intentionally refresh names or repair stale rows.
+- Publishing/correcting/reopening results and roster changes still recalculate.
+  Stage toggles, room locks and status-only saves do not.
+- Only new, meaningfully changed or malformed public rows are written; obsolete
+  rows are deleted. Unchanged rows retain updatedAt, and a repeated unchanged
+  recalculation makes no leaderboard writes/deletes. Stored and public tie rules
+  remain unchanged; alphabetical ordering may change when a username changes.
+- Profiles are read once per distinct participant, in queries of at most 30 UIDs.
+  There are no public profile listeners. Initial leaderboard loads/reconnects and
+  genuine ranking changes can still consume substantial free-plan read quota.
 
 I. LUCKY DRAW
 The administrator dashboard includes a Lucky Draw module. It is separate from the points leaderboard.
