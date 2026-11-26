@@ -2,6 +2,10 @@
 
 A tournament management and audience prediction website for GameFest. Visitors follow rooms and results, sign in with Google, predict group qualifiers and head-to-head winners, and earn leaderboard points. Administrators manage the bracket, publish results, and run a weighted Lucky Draw.
 
+Public site: https://gamefest-tetrio-showdown.web.app/ · Repository: https://github.com/GDGoC-USM/gamefest-tetrio-2026
+
+Current features include live room views, stage/room prediction controls, competitor CSV roster import, result publication/correction/reopening, UID-based scoring, editable public names, and an administrator-operated weighted wheel with history/undo. “Lucky Wheel” in issues refers to the existing **Lucky Draw** dashboard module, not a separate public page.
+
 ## Technology
 
 - Plain HTML, CSS, and browser JavaScript modules; no frontend framework or build step.
@@ -18,10 +22,11 @@ There is no `package.json` or build step. Pure regression scenarios use Node's b
 .
 ├── README.md                 Project setup and team workflow
 ├── AGENTS.md                 Instructions for AI contributors
-├── README_FIRST.txt          Original setup and detailed tournament operations
+├── README_FIRST.txt          Supplementary operations; see caveats below
 ├── .gitignore                Local cache, logs, dependencies, and environment files
 ├── .firebaserc               Default Firebase deployment project
 ├── firebase.json             Hosting directory and Firestore rules path
+├── tests/                    Node regressions and isolated Firestore rule tests
 └── public/
     ├── index.html            Homepage and room overview
     ├── matches.html          Tournament rooms and published results
@@ -39,6 +44,7 @@ There is no `package.json` or build step. Pure regression scenarios use Node's b
         ├── firebase-config.js  Browser Firebase configuration
         ├── shared.js           Firebase initialization, auth, and shared helpers
         ├── tournament.js       Pure tournament format, validation, feeders, and scoring
+        ├── roster-import.js    Pure CSV parsing, identity checks and preview planning
         ├── home.js             Homepage data and sign-in controls
         ├── matches.js          Public room and result display
         ├── predict.js          Prediction selection, saving, and room updates
@@ -53,20 +59,45 @@ Page scripts share Firebase access through `shared.js`. The main Firestore colle
 
 ## Tournament behavior
 
-- Groups `A`, `B`, `C`, and `D` each have eight slots and play five rounds of cumulative free-for-all (FFA). Organisers manually publish two qualifiers in first/second order; roster order never determines seeds.
+- Groups `A`, `B`, `C`, and `D` each have eight slots; blanks are permitted. The documented event format is five cumulative free-for-all (FFA) rounds, but the application records only two manually published qualifiers in first/second order, not group-round scores. Roster order never determines seeds.
 - Eight qualifiers enter four head-to-head quarter-finals (`QF1`–`QF4`, first to 7). Semi-finals (`SF1`, `SF2`) and the third-place match (`THIRD`) are first to 9; `FINAL` is first to 11.
 - Semi-final winners enter `FINAL`; semi-final losers enter `THIRD`. The four quarter-final losers enter `PLACEMENT`: five FFA rounds, awarding 4/3/2/1 points per round. Total points determine fifth through eighth; tied totals leave placings pending until an organiser records an explicit decision.
 - Predictions select two group qualifiers (unordered for scoring) or one winner per head-to-head series. There are no predictions for FFA placement positions. Each correct selected player earns exactly **one point and one Lucky Draw entry**. Unresolved results remain pending, not incorrect.
 - Administrators control prediction availability by stage and can lock individual rooms under **Admin → Rooms**. A room accepts predictions only when its stage is open, its room lock is off, its players are ready, and its results are unpublished and status is not Ended. Locking or ending preserves saved picks and blocks new picks, edits and user resets; unlocking never overrides the other restrictions. Leaderboard recalculation replaces absolute totals from current published results; resaving an unchanged result never adds points again. Legacy semi-final/final picks receive no old bonuses or podium scoring.
-- Lucky Draw excludes winners from subsequent draws until their award is undone.
+- Lucky Draw weights entries by `leaderboard.correct`, excludes zero-correct accounts and excludes winners until their award is undone. An existing saved pool requires **Refresh Latest Entries** after leaderboard changes; freshness is not automatically validated before spinning.
 
-Reopening results clears the room's results, retains its players and own predictions, and transitively resets dependent rooms and deletes their predictions. A room with published downstream results cannot be published, corrected, reopened or re-rostered; the dashboard names the downstream rooms to reopen first, deepest round first. Resets are targeted: only feeder rooms whose confirmed players change are cleared, so a correction that keeps the same winner preserves downstream results and audience predictions. Room updates, the dependency check and the stale-state check commit in one Firestore transaction; dependent predictions are then deleted in batches. Corrected confirmed results feed the bracket again. See [README_FIRST.txt](README_FIRST.txt) for exact feeds, operating steps, and outstanding organiser confirmations.
+Reopening clears the room's results, returns Upcoming and retains its roster and own predictions. Normal result/roster changes reset feeder rooms only when their ordered confirmed player keys change; reset-room predictions are deleted afterwards in batches of 450. Room updates, dependency checks and stale-source checks share one Firestore transaction; prediction deletion and leaderboard recalculation are separate.
+
+The dependency guard blocks publishing, correction, reopening and roster changes whenever a transitive dependent has published results **or Ended status**, including an unpublished Ended room. This also blocks identical/same-winner submissions. Reopen published dependents deepest-first; change unpublished Ended dependents to Upcoming with **Save Room** because they have no Reopen control. Once the guard permits a same-player correction, downstream results/picks are retained.
+
+Exact feeds: `QF1=A1/B2`, `QF2=C1/D2`, `QF3=B1/A2`, `QF4=D1/C2`; `SF1` takes QF1/QF2 winners and `SF2` QF3/QF4 winners. A1/A2 mean A's published first/second qualifier. Only valid published results advance players; unresolved feeder slots remain unpickable.
 
 Room locks use `rooms/<id>.predictionsLocked`. Only `true` locks a room; a missing field means unlocked for backward compatibility. New rooms start unlocked. Stage toggles, roster changes, publishing/reopening results and format migration retain explicit locks, including locks on dependent rooms. Changing a lock alone never changes match status, results, bracket dependencies or saved predictions. `PLACEMENT` has no predictions or lock control.
 
-Administrators can save **Upcoming**, **Live** or **Ended** under the room editor. Ended reuses the existing stored `status: "completed"`; it does not publish results, assign rankings, advance feeders or score picks. Ended rooms with unpublished results remain editable for official result entry and display results pending. Only **Publish Results** confirms results and feeds the bracket. Published rooms must still use **Reopen / Unpublish Results** before corrections; reopening returns them to Upcoming and preserves explicit prediction locks.
+Administrators can save **Upcoming**, **Live** or **Ended** under the room editor. Ended uses stored `status: "completed"`; it blocks prediction saves/resets but does not publish, advance feeders or score picks. **Live does not automatically lock predictions**: lock the room separately. Unpublished Ended rooms allow result entry. **Publish Results** confirms results; **Correct published results** can correct them directly subject to the downstream guard. Reopen is required before changing a published roster/status, not every result correction. Reopening preserves explicit locks.
 
 Player references remain stable legacy string keys in `rooms/<id>.players`. Separate `playerDetails[key]` fields hold a text participant ID (preserving leading zeroes) and a trimmed username. Organisers enter the roster in the admin dashboard; never commit a real roster. Initialising/migrating the tournament requires explicit destructive confirmation in the admin dashboard; it never runs automatically on page load.
+
+### Known discrepancies and proposed work
+
+This audit uses `main` at `c9d4eb9` and the source, not production-data inspection. Merged features include knockout/+1 scoring ([#12](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/12)), roster import ([#18](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/18)), room locks ([#20](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/20)), private profiles/changed-row synchronization ([#22](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/22)), Google-name defaults/Ended status ([#28](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/28)) and transactional room operations ([#26](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/26)).
+
+These open issues are **not implemented guarantees**:
+
+| Issue | Remaining proposal or reported limitation |
+| --- | --- |
+| [#27](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/27) | Fresh ticket validation before spins and concurrent-draw protection |
+| [#29](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/29) | Pointer/winner synchronization, wheel readability/presentation mode, audience/Form imports and identity linking, one-time base participation points/entries |
+| [#30](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/30) | Remaining generic-name repair/consent and synchronization refinements; valid Google-name defaults already exist on Predict |
+| [#31](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/31) | Consistent public sign-in controls and investigation of reported session-restoration problems |
+| [#32](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/32) | Personal prediction statistics and highlighting the signed-in leaderboard row |
+| [#15](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/15) | Enforced administrator anti-abuse controls/monitoring; production provider settings are not established by source |
+
+There are currently **no base participation points**, no audience/Form importer and no registration-to-Auth link. The CSV importer below handles competitors, not wheel participants. Points equal correct picks; wheel weights use correct picks. Reported pointer/winner mismatches remain unresolved; do not present the animation as verified prize-selection accuracy or assume multiple administrators can draw safely together.
+
+`README_FIRST.txt` retains event context but contains conflicting instructions: its create-project/combined-deploy sections do not apply to this configured repository; results can be corrected without reopening; resets are conditional; and cleanup recovery is not guaranteed for every failure. Follow this README/current source in those cases. Its organiser questions remain unresolved: THIRD is implemented as FT9 despite an FT5 rulebook reference, FFA ties need manual decisions, and roster completeness/knockout prediction intent need confirmation. Do not silently change the application to resolve intended requirements.
+
+Other current limitations: CSV preview lists dependents more broadly than targeted save may reset; manual roster editing lacks CSV's global ID/username uniqueness checks. Initialization/migration uses a separate unchunked batch, not the normal transaction path. These are reported findings, not application changes in this documentation PR.
 
 ## Full names and privacy
 
@@ -99,9 +130,9 @@ Public equal-score rows retain shared ranks and alphabetical name ordering, then
 
 ## Leaderboard recalculation and Spark usage
 
-Use **Admin → Prediction Settings → Recalculate leaderboard** to intentionally refresh names or repair stale data. Signing into the dashboard no longer recalculates. Publishing, correcting or reopening results, roster changes and format initialisation retain their automatic recalculation. Stage toggles, room locks and status-only saves do not recalculate. Resubmitting an unchanged published result still performs an intentional repair/recalculation without resetting predictions.
+Use **Admin → Prediction Settings → Recalculate leaderboard** to intentionally refresh names or repair stale data. Admin sign-in does not recalculate. Publishing, correcting or reopening results, roster changes and initialization trigger recalculation after successful room processing. Stage toggles, room locks and status-only saves do not. Unchanged published-result submissions recalculate only if the dependency guard allows them.
 
-Each recalculation reads predictions, rooms and the existing leaderboard once. Reopening, correcting or re-rostering a room reads the fresh rooms inside one transaction, then reads only the reset rooms' predictions and deletes them in batches of at most 450. If a delete batch fails after the room state committed, the dashboard still recalculates the leaderboard, reports how many predictions remain, and leaves them pending: they score nothing while their rooms are unpublished and are removed the next time those rooms are reset. It scores/deduplicates predictions, queries profiles only for distinct participating UIDs in document-ID groups of at most 30, and reuses one in-memory username map. It does not read a profile per prediction or attach any profile listener.
+Each recalculation reads predictions, rooms and the existing leaderboard once. Normal room changes read fresh rooms transactionally, then query only reset-room predictions. Caught delete-batch failures attempt refresh/recalculation and report leftovers, but a prediction-query failure bypasses that recovery and refresh/recalculation can also fail. Surviving picks score nothing **while their rooms are unpublished**, but can score after republishing; resolve cleanup before continuing. Recalculation deduplicates predictions, queries distinct participating profiles in document-ID groups of at most 30 and reuses one name map. It does not read a profile per prediction or attach public profile listeners.
 
 The existing leaderboard snapshot is compared against the exact public schema and all persisted ranking values. New, changed, malformed or extra-field rows are fully replaced; obsolete participants are deleted. An unchanged row retains its `updatedAt`. An unchanged recalculation commits no batches. Write/delete batches remain capped at 450 operations; failures surface through the existing dashboard error path. If some batches committed before a later failure, explicitly recalculate again: totals remain absolute and repeatable.
 
@@ -123,40 +154,46 @@ Initial public leaderboard subscriptions still read all rows: 150 viewers × 150
 
 See [Firestore listener billing](https://firebase.google.com/docs/firestore/pricing#listening_to_query_results) and [free quotas](https://firebase.google.com/docs/firestore/quotas#free-quota). Run the synthetic tests below for measured application-operation counts; those counts are not Firebase production billing.
 
+The live billing plan and remaining quotas cannot be established from repository configuration. For Spark planning, current published limits are:
+
+| Resource | No-cost allowance |
+| --- | --- |
+| Firestore reads | 50,000/day |
+| Firestore writes / deletes | 20,000/day each |
+| Firestore stored data | 1 GiB; one free database/project |
+| Firestore outbound transfer | 10 GiB/month |
+| Hosting storage / transfer | 10 GB stored / 10 GB per month transferred |
+
+Firestore daily quotas reset around midnight Pacific time. Hosting quotas are shared across sites/channels; exhausted Spark quotas can interrupt service or prevent deployment, not automatically provide paid overage. The application has no Cloud Functions or scheduled backend scorer. Do not assume paid monitoring, backups or Functions are available on Spark; billing changes need separate approval. See [Spark/Blaze plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans) and [Hosting quotas](https://firebase.google.com/docs/hosting/usage-quotas-pricing).
+
 ## Getting started
 
-Install [Git](https://git-scm.com/downloads), [Node.js LTS](https://nodejs.org/), **Java 21** (required by the current Firestore emulator), and the [Firebase CLI](https://firebase.google.com/docs/cli):
+Install [Git](https://git-scm.com/downloads), a supported [Node.js LTS](https://nodejs.org/) with npm and **Java 21 or later** for the current Firestore emulator. The audit found Node 26.13.0, npm 11.20.0 and Firebase CLI 15.37.0 locally; these are observed versions, not a project-enforced toolchain. Install the CLI separately (there are no application dependencies):
 
 ```sh
-npm install -g firebase-tools
+npm install -g firebase-tools@15.37.0
 ```
+
+Check `git --version`, `node --version`, `npm --version`, `firebase --version` and `java -version`. The CLI package requires Node 20+, but its Hosting dependency declares Node 20/22/24; prefer supported Node 24 LTS. The audit's Node 26 installation succeeded with an `EBADENGINE` warning, not a clean compatibility result. Java 21+ must be selected through `JAVA_HOME` and `PATH`, not merely installed alongside Java 17. On Windows reopen the terminal after choosing the JDK and verify its selection. First startup may download emulator binaries/UI; browser SDK imports also need internet access.
 
 Clone the repository and open its folder:
 
 ```sh
-git clone https://github.com/JavanMyna/gamefest-tetrio-2026.git
+git clone https://github.com/GDGoC-USM/gamefest-tetrio-2026.git
 cd gamefest-tetrio-2026
 ```
 
-### Choose the Firebase project first
+### Keep the configured Firebase project
 
-The checked-in client configuration and default deployment target currently point to **`gamefest-tetrio-2026`**. Connecting GitHub to a different Firebase project does **not** change the browser's Firebase configuration.
+The checked-in browser configuration/default deployment project are **`gamefest-tetrio-2026`**. Keep `.firebaserc`, `firebase.json`, workflows and `public/js/firebase-config.js` unchanged for normal contribution/local preview. Do not run `firebase init`, create a replacement project, add aliases or copy different web configuration into this repository. Changing GitHub ownership does not change the Firebase backend.
 
-Before using a replacement project:
-
-1. Create a Firebase project and register a Web App in the Firebase console.
-2. Copy its web configuration into `public/js/firebase-config.js`.
-3. Update the `projects.default` value in `.firebaserc` to the new project ID.
-4. Create a Firestore database and deploy `public/firestore.rules` before accepting user data.
-5. Enable Google sign-in in Authentication. Enable Email/Password too if administrators will use the password form.
-6. Add the deployed domain and, for local sign-in, `localhost` to Authentication's authorized domains.
-7. Create administrator access as described below.
+There is no `.env` loader, required environment-variable file, root `npm install`, build or application server. The checked-in configuration serves the static site. Demo emulators need no real Firebase project or Firebase login; production login/provider/project setup are separately authorized maintainer tasks.
 
 Firebase web configuration is public browser configuration, not an administrator secret. Never commit account passwords, service-account JSON files, private keys, or deployment tokens. `.env` files are ignored, but this application does not currently load environment variables.
 
 ### Grant administrator access
 
-There is no hardcoded administrator password.
+There is no hardcoded administrator password. The following describes **authorized backend provisioning**, not a local-preview prerequisite. Use only synthetic identities in an aligned local emulator namespace; never create a production administrator merely to test setup.
 
 1. Sign in with the intended Google account, or create an Email/Password user in Firebase Authentication.
 2. Copy the account's UID from Authentication's user list.
@@ -164,6 +201,10 @@ There is no hardcoded administrator password.
 4. Open `/admin/index.html` and sign in with that account.
 
 The supplied Firestore rules restrict administrative writes and prevent browser clients from granting themselves admin roles. Hiding the dashboard alone is not a security boundary; deploy the rules to the selected project.
+
+Home/Predict offer Google popup sign-in; admin supports Google and Email/Password. Matches/Leaderboard currently lack equivalent auth controls. Shared initialization uses `getAuth()` without explicitly configuring persistence; missing controls or a delayed observer do not prove a lost session. Admin signs non-admin accounts out after permission denial, which can affect same-origin tabs. Improvements are tracked in #31.
+
+For an approved production release, a maintainer must confirm the existing project's providers and authorized deployed domains; this audit did not inspect/change them. Firestore permissions, not hidden navigation or a known email, enforce admin access. See [AGENTS.md](AGENTS.md#firestore-data-and-permissions) for collection schemas/access boundaries.
 
 ### Import a participant roster
 
@@ -187,7 +228,7 @@ Keep real participant CSVs outside the repository, or in the ignored `.local/` d
 
 ### Run locally
 
-Use the isolated demo project; no live backend access is needed:
+From the **repository root** (containing `firebase.json`), start the isolated demo CLI environment:
 
 ```sh
 firebase emulators:start --only auth,firestore,hosting --project demo-gamefest
@@ -195,9 +236,25 @@ firebase emulators:start --only auth,firestore,hosting --project demo-gamefest
 
 Open the Hosting URL printed by the CLI, normally `http://localhost:5000`. Serve the site over HTTP rather than opening HTML files with `file://`. `firebase.json` configures Authentication on port `9099`, Firestore on `8080`, and Hosting on `5000`.
 
-On localhost, the client automatically connects Authentication to `127.0.0.1:9099` and Firestore to `127.0.0.1:8080`. It never falls back to production if an emulator is unavailable. Create synthetic local accounts and `admins/<UID>` documents with `role: "admin"` through the emulator UI at the URL printed by the CLI. Emulator accounts and documents are separate from production.
+On exactly `localhost`, `127.0.0.1` or `[::1]`, the client routes Auth/Firestore to `127.0.0.1:9099`/`127.0.0.1:8080`; unavailable emulators do not fall back to production. The emulator UI normally opens at `http://127.0.0.1:4000`. Run all three services, not Hosting alone; the client expects those fixed Auth/Firestore ports.
 
-Explicit production hosts retain the configured production Firebase connection. Do not use a deployed host for destructive testing. Starting Hosting alone is insufficient: run all three emulators above.
+**Current browser setup blocker:** `--project demo-gamefest` selects the CLI/UI project but does **not** replace the browser's checked-in `projectId: "gamefest-tetrio-2026"`. `singleProjectMode: false` allows multiple local namespaces; it does not align Auth accounts, UI documents or loaded rules. An account/admin document created in the demo UI is not a verified browser-admin setup. Rule tests below explicitly load rules into their own demo namespaces; they do not verify cross-service browser configuration.
+
+Until an explicitly authorized local namespace/rules setup is established, use this command for startup/HTTP preview and demo rule tests for authorization checks; do not claim authenticated browser flows are verified. Do not change tracked identifiers, use live accounts or bypass rules to hide the mismatch. See Firebase's [project-ID alignment requirement](https://firebase.google.com/docs/emulator-suite/connect_firestore#choose_a_firebase_project).
+
+Use only loopback URLs. LAN IPs, custom hostnames and deployed/PR-preview hosts do not enable emulator routing and retain production configuration. Never use them for destructive testing. `Ctrl+C` stops the suite; without explicit import/export, emulator state is disposable. Keep synthetic artifacts in ignored `.local/`, never real participant exports.
+
+### Post-testing cleanup
+
+On isolated test data, use existing controls rather than mass-deleting collections:
+
+1. Stop submitting predictions; close stages/lock affected rooms before cleanup.
+2. Reopen published descendants deepest-first: FINAL/THIRD/PLACEMENT, then semi-finals, quarter-finals and groups as applicable. For unpublished Ended rooms use **Save Room → Upcoming**.
+3. Use **Reopen / Unpublish Results** for the tested published room. Its roster/own predictions remain; changed downstream feeders reset and their predictions are deleted. Review the actual affected-room confirmation.
+4. Check partial-cleanup errors, then **Recalculate leaderboard**. Recalculation repairs totals but does not delete leftover picks. Do not republish before cleanup is resolved: survivors can otherwise score.
+5. Undo synthetic Lucky Draw winners separately, then **Refresh Latest Entries**. Reopening does not clear draw history/exclusions or refresh the wheel. Undo restores historical entry weight; refresh reconciles it with current scores. Draw/history/undo use separate writes, so failures can leave partial state.
+
+Reopen is not an account/profile/prediction wipe or migration shortcut. Restart disposable emulators without import for a fresh session. Production cleanup, reopening and draw undo require separate explicit authorization.
 
 ## Team collaboration: branch → pull request → main
 
@@ -235,7 +292,7 @@ The filenames and commit message above are examples: stage only the files you in
 git push -u origin feature/homepage-layout
 ```
 
-On [GitHub](https://github.com/JavanMyna/gamefest-tetrio-2026), open **Pull requests → New pull request** (or use **Compare & pull request** after pushing):
+On [GitHub](https://github.com/GDGoC-USM/gamefest-tetrio-2026), open **Pull requests → New pull request** (or use **Compare & pull request** after pushing):
 
 - Set **base** to `main` and **compare** to your task branch.
 - Explain what changed and why.
@@ -268,62 +325,71 @@ Availability depends on the repository's visibility and GitHub plan. Until prote
 
 ## Verification before a PR
 
-Run `node --test tests/tournament.test.mjs tests/roster-import.test.mjs` for isolated tournament, scoring, validation, dependency and CSV import regression scenarios. These checks do not contact Firebase. Then test the affected flow in a browser and report exactly what you checked:
-
-- Public page changes: navigation, desktop/mobile layout, loading states, and console errors.
-- Authentication/predictions: signed-out and signed-in behavior, saving/resetting picks, and closed stages.
-- Tournament administration: publishing/reopening results, dependent room generation, and leaderboard scoring.
-- Lucky Draw: ticket eligibility, winner exclusion, persistence, and undo.
-- Security rules: use the isolated Auth/Firestore emulators to check authorized and unauthorized access; a UI check does not prove rule enforcement.
-
-Run only the checks relevant to your change. Do not modify live event data to verify a PR.
-
-Room-lock authorization regressions run against a loopback Firestore emulator with synthetic identities and a unique disposable `demo-room-lock-*` project:
+Run commands from the repository root and choose files relevant to your change. There is no `npm test`, build/lint script or checked-in automated test workflow. Existing dependency-free regressions:
 
 ```sh
-firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/prediction-lock.rules.test.mjs"
+node --test tests/tournament.test.mjs tests/roster-import.test.mjs
+node --test tests/usernames.test.mjs tests/profile-initialization.test.mjs tests/leaderboard-sync.test.mjs
 ```
 
-Java 21 is required. The test skips without `FIRESTORE_EMULATOR_HOST`, rejects non-loopback emulator hosts, loads the checked-in rules and cleans up its own fixture documents. It covers room-lock create/update/delete denial, legacy resets, administrator-only lock changes, independent rooms, stage/result/readiness restrictions and head-to-head predictions. Inspect live updates and controls in the browser separately.
+These cover tournament/scoring/feeders/statuses, CSV import, names/profile initialization and leaderboard ranking/delta planning without Firebase access. They do not prove transaction races, browser auth restoration, wheel geometry or production usage.
 
-Full-name validation and privacy regressions (test filenames retain the internal username naming):
+With Java 21+ selected, run isolated rules checks:
 
 ```sh
-node --test tests/usernames.test.mjs tests/profile-initialization.test.mjs tests/tournament.test.mjs tests/leaderboard-sync.test.mjs
 firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
 ```
 
-The full-name unit and rule tests share the same validation cases. Rule tests use unique disposable demo projects, reject non-loopback hosts, and cover owner/admin access, forbidden listing, moderation, field allowlists, public leaderboard reads and private predictions. Without `FIRESTORE_EMULATOR_HOST`, rule tests explicitly skip; a skip or static inspection does not prove runtime enforcement. If Java 21 or later is unavailable, run the unit command and report the emulator tests as unexecuted.
+Stop an existing suite first if it occupies port 8080. `emulators:exec` starts Firestore, sets `FIRESTORE_EMULATOR_HOST` for its child and stops it afterwards. Tests reject non-loopback hosts, use unique disposable `demo-*` namespaces, install checked-in rules and clean their fixtures. They check allowed/denied profiles/moderation, exact public leaderboard schemas, private predictions, room locks/stages/readiness/results and absolute leaderboard sync. No Auth emulator login/service-account key is needed. Without `FIRESTORE_EMULATOR_HOST`, rule tests **skip**; a skip is not verification.
 
-Browser checklist on the local Auth/Firestore/Hosting emulators:
+For browser changes, serve HTTP, inspect desktop/mobile layout and check console errors. Authenticated flows require aligned isolated Auth/Firestore namespaces/rules; the current demo/browser mismatch above is a blocker, not a passing flow:
 
-- Desktop and mobile: sign in with a synthetic Google account, save a valid name, refresh and verify persistence; confirm Google identity is unchanged.
-- Try too-short/long names, email, HTML, punctuation-only, controls and line breaks; verify rejection. Check Unicode names, apostrophes and other supported punctuation save correctly.
-- Save a name with predictions locked; confirm the saved predictions and scores remain unchanged.
-- Sign out and switch accounts during loading/saving; confirm no previous profile state remains.
-- As administrator, load names, cancel a reset, then confirm a reset; verify it appears only after recalculation.
-- With synthetic stale leaderboard names/fields, recalculate and inspect the local documents for the exact public schema.
-- Verify unauthorized profile/leaderboard requests in rule tests, not just hidden UI controls.
+- Public pages: navigation, loading/error states, room/results views and responsive layout.
+- Profiles/auth: synthetic sign-in, valid Google defaults/custom-name preservation, save/refresh, invalid-name rejection, sign-out/account switching and restoration; no prior-user state may leak.
+- Predictions: two distinct group qualifiers or one series winner; stage/room/status locking, save/edit/reset denial and pending/resolved results.
+- Administration: unauthorized access, publish/direct correction/reopen, targeted feeder resets, partial-cleanup errors, recalculation and full-name moderation.
+- Lucky Draw: refresh after recalculation, inspect weights, zero-entry exclusion, winner reveal, persistence/undo. Do not claim freshness/concurrency/pointer accuracy before open issues are fixed and tested.
+- Security: check allowed/denied requests through rule tests, not merely hidden UI.
+
+Documentation-only changes need path/link/configuration and command checks, not live backend access. Report exact results, versions and blockers in the PR; installation/startup does not prove all flows. Perform post-test cleanup only on isolated data.
+
+### Setup verification record
+
+Audit verification on 2026-11-26, without production-data access:
+
+| Check | Observed result |
+| --- | --- |
+| Clone from the GDGoC-USM repository into an isolated folder | Succeeded |
+| `npm install -g --prefix .local/firebase-cli firebase-tools@15.37.0` | Succeeded; Node 26 `EBADENGINE`, deprecation and install-script-policy warnings |
+| Two Node commands above | 21 and 29 tests passed; no failures/skips |
+| Firestore `emulators:exec` command above | Initially blocked by selected Java 17; passed all 29 tests after selecting installed Java 25.0.4.1 |
+| Auth/Firestore/Hosting startup from the clean clone's root | All three ready at configured ports; UI at 4000 |
+| Browser Home, Matches, Predict, Leaderboard and Admin | All HTTP 200; no captured JavaScript/console errors during signed-out navigation |
+| Markdown local links/anchors and referenced paths | Checked against this checkout |
+
+The isolated CLI was invoked through its installed Node entry point rather than changing the machine's global installation. Browser network inspection confirmed loopback Firestore requests still name `gamefest-tetrio-2026`; no real sign-in, privileged browser flow, production provider/rule state, wheel outcome or deployment was verified. The namespace mismatch remains a documented implementation blocker. Installation warnings and successful tests do not certify Node 26 support; use the supported LTS recommendation above.
 
 
 ## Deployment
 
-Deployment is a maintainer action after review and explicit authorisation. Do not change the configured Firebase project or deployment targets.
+Deployment is a maintainer action after review and explicit authorization; these commands are a runbook, **not local verification**. Keep the configured project/targets unchanged. This audit did not execute production deployment or verify remote rules/provider/billing state.
 
-For this release, pause administrator result changes, recalculations and draw refreshes during the cutover. Deploy the **rules first**, then Hosting:
+For releases depending on changed rules, pause admin result changes, recalculations and draws. Deploy/confirm compatible **rules first**, then release Hosting:
 
 ```sh
 firebase deploy --only firestore:rules --project gamefest-tetrio-2026
 firebase deploy --only hosting --project gamefest-tetrio-2026
 ```
 
-Rules-first allows Unicode full-name profiles and their public leaderboard rows before the new editor runs. Prediction writes retain their schema, and the existing rules already block `completed` rooms. Old clients may not render new Unicode names correctly; close/reload public and admin tabs before resuming operations. If Hosting deployment fails, finish the forward deployment rather than weakening privacy validation.
+Hosting workflows do **not** deploy rules or run tests: a push/merge to `main` deploys live Hosting; a same-repository PR creates a Hosting preview. Coordinate required rules **before** the Hosting-only cutover; listing both products in one deploy command is not an ordered release procedure. Do not manually duplicate a successful automatic Hosting release unless a maintainer chooses that path.
+
+For full-name/privacy releases, rules-first permits Unicode profiles and strict public leaderboard rows before the editor runs. Previews still use production backend configuration/current deployed rules, not a test database; new preview code may be incompatible with unreleased rules. Close/reload public/admin tabs before resuming. If Hosting fails, prefer a privacy-preserving forward fix rather than weakening validation.
 
 After Hosting deploys, require administrators to reload the dashboard. Verify access with approved accounts before resuming operations. A maintainer must separately authorise any production recalculation that replaces stale public names/fields; deployment alone does not clean existing Firestore documents. Do not inspect or repair production data merely to verify this release.
 
 Rollback: revert application commits in reverse order, but review the privacy impact before restoring older code or rules. Old recalculation code can republish prediction identities. Keep private profiles private; do not delete profiles, predictions or draw history as a rollback shortcut. Prefer a privacy-preserving forward fix over restoring the original leak.
 
-Pushes to `main` trigger a live Hosting deployment; pull requests trigger a preview. No branch push, PR, deployment or production-data operation is part of local verification.
+No deployment/production-data operation belongs to local verification. Branch pushes and PR creation are separately authorized collaboration actions; opening a PR can trigger the existing preview workflow even for documentation changes. Do not merge, push to main or execute production deployment commands without required review/authorization.
 
 ## AI contributors
 
