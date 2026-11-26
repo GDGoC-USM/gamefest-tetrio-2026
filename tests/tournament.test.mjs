@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ROOM_CONFIG, deriveRooms, dependentRoomIds, publishedDependentIds, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
+import { ROOM_CONFIG, deriveRooms, dependentRoomIds, publishedDependentIds, dependentResets, withoutResults, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
 
 function sample() {
   const rooms = {};
@@ -125,4 +125,24 @@ test('published downstream rooms block reopening and are listed deepest first', 
   rooms.PLACEMENT = { ...rooms.PLACEMENT, resultsPublished: true };
   assert.deepEqual(publishedDependentIds('A', rooms), ['PLACEMENT', 'QF1']);
   assert.deepEqual(publishedDependentIds('C', rooms), ['PLACEMENT', 'QF4', 'QF2']);
+});
+
+test('resets follow changed feeder players, preserving unchanged results and picks', () => {
+  const rooms = sample();
+  assert.deepEqual(dependentResets(rooms, {}), []);
+  // Identical republish and a correction that keeps the same winner change no progression.
+  assert.deepEqual(dependentResets(rooms, { QF1: { ...rooms.QF1 } }), []);
+  assert.deepEqual(dependentResets(rooms, { QF1: { ...rooms.QF1, scores: [7, 2] } }), []);
+  assert.deepEqual(dependentResets(rooms, { PLACEMENT: { ...rooms.PLACEMENT, resultsPublished: true } }), []);
+  // Flipping the winner changes SF1, then FINAL/THIRD, and PLACEMENT via the loser.
+  const flipped = { ...rooms.QF1, scores: [2, 7], winner: rooms.QF1.loser, loser: rooms.QF1.winner };
+  assert.deepEqual(dependentResets(rooms, { QF1: flipped }), ['SF1', 'FINAL', 'THIRD', 'PLACEMENT']);
+  // Reopening a group clears its seeds, so its whole subtree changes.
+  assert.deepEqual(dependentResets(rooms, { A: withoutResults(rooms.A) }),
+    ['QF1', 'QF3', 'SF1', 'SF2', 'FINAL', 'THIRD', 'PLACEMENT']);
+  const reopened = withoutResults(rooms.A);
+  assert.equal(reopened.status, 'upcoming');
+  assert.equal(reopened.resultsPublished, false);
+  assert.deepEqual(reopened.players, rooms.A.players);
+  assert.equal(reopened.qualifiers, undefined);
 });

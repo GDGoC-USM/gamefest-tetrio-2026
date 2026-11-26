@@ -1,13 +1,14 @@
 import {
   auth, db, signIn, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  isAdmin, collection, doc, getDoc, getDocs, setDoc, writeBatch,
+  isAdmin, collection, doc, getDoc, getDocs, setDoc, writeBatch, runTransaction,
   serverTimestamp, escapeHTML, showMessage, query, where
 } from "./shared.js";
 import {
   ROOM_CONFIG, STAGES, isPlayer, playerLabel, roomReady,
   validateGroupResult, validateSeriesResult, validateFFAResult,
   deriveRooms, dependentRoomIds, calculateLeaderboard,
-  hasPublishedResults as completed, publishedDependentIds
+  hasPublishedResults as completed, publishedDependentIds,
+  dependentResets, withoutResults
 } from "./tournament.js";
 import { parseRosterCSV, prepareRosterImport } from "./roster-import.js";
 import { DEFAULT_USERNAME, publicUsername } from "./usernames.js";
@@ -160,15 +161,6 @@ async function fetchRooms() {
   const snapshot = await getDocs(collection(db, "rooms"));
   roomsCache = Object.fromEntries(snapshot.docs.map(item => [item.id, item.data()]));
   return roomsCache;
-}
-
-function emptyResult(room) {
-  const clean = { ...room, status: "upcoming", resultsPublished: false };
-  for (const field of [
-    "qualifiers", "scores", "winner", "loser", "rounds", "totals", "placings",
-    "tied", "decision", "champion", "runnerUp", "secondRunnerUp", "resultsPublishedAt"
-  ]) delete clean[field];
-  return clean;
 }
 
 function baseRoom(config) {
@@ -414,29 +406,34 @@ function requireInitialized() {
   }
 }
 
-function dependencyWarning(id, verb) {
-  const ids = dependentRoomIds(id);
+function blockedError(action, blockers) {
+  const names = blockers.map(dependentId => configFor(dependentId).name);
+  return new Error(`${action} is blocked: ${names.join(", ")} ${names.length === 1 ? "still has" : "still have"} ` +
+    `published results. Reopen ${names.length === 1 ? "that room" : "those rooms"} first, in this order: ` +
+    `${names.join(" → ")}. Nothing was changed.`);
+}
+
+function dependencyWarning(id, verb, resetIds) {
   return `${verb} ${configFor(id).name}?\n\n` +
-    (ids.length ? `Reset dependent rooms: ${ids.join(", ")}. Their results will be cleared and ALL their predictions deleted.\n\n` : "") +
+    (resetIds.length
+      ? `Reset dependent rooms: ${resetIds.join(", ")}. Their players change, so their results are cleared and their predictions deleted.\n\n`
+      : "No dependent room players change, so downstream results and predictions are retained.\n\n") +
     "This room’s predictions are retained. Continue?";
 }
 
 // A feeder result may only change while every downstream room is unpublished;
 // otherwise changing it would silently discard official downstream results.
-function assertNoPublishedDependents(id, action) {
-  const blockers = publishedDependentIds(id, roomsCache);
-  if (!blockers.length) return;
-  const names = blockers.map(dependentId => configFor(dependentId).name);
-  throw new Error(`${action} is blocked: ${names.join(", ")} ${names.length === 1 ? "still has" : "still have"} ` +
-    `published results. Reopen ${names.length === 1 ? "that room" : "those rooms"} first, in this order: ` +
-    `${names.join(" → ")}. Nothing was changed.`);
+function assertNoPublishedDependents(id, action, rooms = roomsCache) {
+  const blockers = publishedDependentIds(id, rooms);
+  if (blockers.length) throw blockedError(action, blockers);
 }
 
-function reopenWarning(id) {
-  const ids = dependentRoomIds(id);
+function reopenWarning(id, resetIds) {
   return `Unpublish results for ${configFor(id).name}?\n\n` +
     "Its published result is removed and the room returns to an editable state. Its players and its own predictions are kept; prediction scores are recalculated from the remaining published results.\n\n" +
-    (ids.length ? `Reset dependent rooms: ${ids.join(", ")}. Their results are cleared and their predictions are deleted.\n\n` : "") +
+    (resetIds.length
+      ? `Reset dependent rooms: ${resetIds.join(", ")}. Their results are cleared and their predictions are deleted.\n\n`
+      : "") +
     "Unrelated tournament data is not affected. Continue?";
 }
 
@@ -455,36 +452,48 @@ async function predictionsForRooms(roomIds) {
   return [...references.values()];
 }
 
-// Source, transitive resets and feeder metadata commit atomically before prediction
-// cleanup, which is chunked because one batch cannot exceed 500 writes.
-async function writeRoomChanges(sources, resetIds) {
-  const working = { ...roomsCache, ...Object.fromEntries(sources) };
-  resetIds.forEach(dependentId => {
-    working[dependentId] = emptyResult(working[dependentId] || baseRoom(configFor(dependentId)));
-  });
-  const derived = deriveRooms(working);
-  const updates = new Map(sources);
-  resetIds.forEach(dependentId => {
-    updates.set(dependentId, {
-      ...derived[dependentId], predictionsLocked: working[dependentId].predictionsLocked === true
+// Room state, the dependency guard and the stale check commit in one transaction.
+// Prediction cleanup outside it is chunked: one batch cannot exceed 500 writes.
+async function writeRoomChanges(sources, resetIds, action, expected = roomsCache) {
+  await runTransaction(db, async transaction => {
+    const snapshots = await Promise.all(ROOM_CONFIG.map(config =>
+      transaction.get(doc(db, "rooms", config.id))));
+    const fresh = {};
+    snapshots.forEach(item => { if (item.exists()) fresh[item.id] = item.data(); });
+    for (const id of sources.keys()) {
+      const before = expected[id] ?? baseRoom(configFor(id));
+      if (!same(fresh[id] ?? baseRoom(configFor(id)), before)) {
+        throw new Error("This room changed since you opened it. Select the room again before saving.");
+      }
+    }
+    if (action) for (const id of sources.keys()) assertNoPublishedDependents(id, action, fresh);
+    if (action && !same(dependentResets(fresh, sources), resetIds)) {
+      throw new Error("The tournament changed while this action was prepared. Reload the dashboard and try again. Nothing was changed.");
+    }
+    const working = { ...fresh, ...Object.fromEntries(sources) };
+    resetIds.forEach(id => { working[id] = withoutResults(working[id] || baseRoom(configFor(id))); });
+    const derived = deriveRooms(working);
+    const updates = new Map(sources);
+    resetIds.forEach(id => {
+      updates.set(id, { ...derived[id], predictionsLocked: working[id].predictionsLocked === true });
+    });
+    // Metadata changes also reach unchanged feeder rosters without overwriting their results.
+    for (const [id, expected] of Object.entries(derived)) {
+      if (updates.has(id)) continue;
+      const current = working[id];
+      if (current && same(current.players, expected.players) &&
+        !same(current.playerDetails || {}, expected.playerDetails || {})) {
+        updates.set(id, { ...current, playerDetails: expected.playerDetails });
+      }
+    }
+    // Reads must precede writes inside a transaction.
+    updates.forEach((room, id) => {
+      transaction.set(doc(db, "rooms", id), { ...room, updatedAt: serverTimestamp() });
     });
   });
-  // Metadata changes also reach unchanged feeder rosters without overwriting their results.
-  for (const [dependentId, expected] of Object.entries(derived)) {
-    if (updates.has(dependentId)) continue;
-    const current = working[dependentId];
-    if (current && same(current.players, expected.players) &&
-      !same(current.playerDetails || {}, expected.playerDetails || {})) {
-      updates.set(dependentId, { ...current, playerDetails: expected.playerDetails });
-    }
-  }
-  const predictionRefs = resetIds.length ? await predictionsForRooms(resetIds) : [];
-  const batch = writeBatch(db);
-  updates.forEach((room, roomId) => {
-    batch.set(doc(db, "rooms", roomId), { ...room, updatedAt: serverTimestamp() });
-  });
-  await batch.commit();
+  const predictionRefs = await predictionsForRooms(resetIds);
   let deleted = 0;
+  let failure = "";
   for (let index = 0; index < predictionRefs.length; index += 450) {
     const chunk = predictionRefs.slice(index, index + 450);
     const deletion = writeBatch(db);
@@ -492,17 +501,21 @@ async function writeRoomChanges(sources, resetIds) {
     try {
       await deletion.commit();
     } catch (error) {
-      throw new Error(`Room results were saved, but only ${deleted} of ${predictionRefs.length} dependent predictions could be deleted: ${error.message}. Reload the dashboard and recalculate the leaderboard.`);
+      failure = `Room results were saved, but only ${deleted} of ${predictionRefs.length} dependent predictions could be deleted: ${error.message}.`;
+      break;
     }
     deleted += chunk.length;
   }
-  return deleted;
+  return { deleted, failure, resetIds };
 }
 
-async function writeRoomChange(id, source, resetDependents) {
-  const deleted = await writeRoomChanges(new Map([[id, source]]), resetDependents ? dependentRoomIds(id) : []);
-  await refreshAfterWrite(id, resetDependents);
-  return deleted;
+async function writeRoomChange(id, source, resetIds, action) {
+  const outcome = await writeRoomChanges(new Map([[id, source]]), resetIds, action);
+  await refreshAfterWrite(id);
+  if (outcome.failure) {
+    throw new Error(`${outcome.failure} The leaderboard was recalculated from the remaining published results; leftover predictions stay pending and score nothing until their rooms are reset again.`);
+  }
+  return outcome;
 }
 
 async function refreshAfterWrite(id, recalculate = true) {
@@ -580,23 +593,25 @@ $("saveRosterImportBtn").addEventListener("click", () => persist(async () => {
   }
   const plan = prepareRosterImport(preview.entries, roomsCache);
   if (!plan.changedRoomIds.length) return;
-  plan.changedRoomIds.forEach(id =>
-    assertNoPublishedDependents(id, `Importing the roster for ${configFor(id).name}`));
-  if (!confirm(`Import roster for groups ${plan.changedRoomIds.join(", ")}?\n\n` +
-    "Replace their entire rosters in file order and leave unused slots empty. Groups absent from the CSV are unchanged.\n\n" +
-    `Reset dependent rooms: ${plan.resetRoomIds.join(", ") || "none"}. Their results will be cleared and ALL their predictions deleted.\n\n` +
-    "Predictions for the imported groups are retained. Continue?")) return;
   const sources = new Map(plan.changedRoomIds.map(id => [id, {
-    ...emptyResult(roomsCache[id]), ...plan.rosters[id],
+    ...withoutResults(roomsCache[id]), ...plan.rosters[id],
     name: configFor(id).name, stage: configFor(id).stage,
     stageId: configFor(id).stage, formatVersion: 2,
     status: roomsCache[id].status === "live" ? "live" : "upcoming"
   }]));
-  const deleted = await writeRoomChanges(sources, plan.resetRoomIds);
+  const action = `Importing the roster for groups ${plan.changedRoomIds.join(", ")}`;
+  plan.changedRoomIds.forEach(id => assertNoPublishedDependents(id, action));
+  const resetIds = dependentResets(roomsCache, sources);
+  if (!confirm(`Import roster for groups ${plan.changedRoomIds.join(", ")}?\n\n` +
+    "Replace their entire rosters in file order and leave unused slots empty. Groups absent from the CSV are unchanged.\n\n" +
+    `Reset dependent rooms: ${resetIds.join(", ") || "none"}. Their results will be cleared and their predictions deleted.\n\n` +
+    "Predictions for the imported groups are retained. Continue?")) return;
+  const outcome = await writeRoomChanges(sources, resetIds, action);
   clearRosterPreview();
   $("rosterCSV").value = "";
   await refreshAfterWrite(editorId);
-  notify(`Roster imported for groups ${plan.changedRoomIds.join(", ")}. ${deleted} dependent prediction(s) deleted; group predictions retained.`, "success");
+  if (outcome.failure) throw new Error(`${outcome.failure} The leaderboard was recalculated; leftover predictions stay pending until their rooms are reset again.`);
+  notify(`Roster imported for groups ${plan.changedRoomIds.join(", ")}. ${outcome.deleted} dependent prediction(s) deleted; group predictions retained.`, "success");
 }));
 
 $("saveRoomBtn").addEventListener("click", () => persist(async () => {
@@ -605,22 +620,29 @@ $("saveRoomBtn").addEventListener("click", () => persist(async () => {
   if (completed(previous)) throw new Error("Reopen this room explicitly before editing its roster or status.");
   const roster = readRoster();
   const changed = !same(previous.players, roster.players) || !same(previous.playerDetails || {}, roster.playerDetails);
-  if (changed) assertNoPublishedDependents(editorId, `Saving roster changes for ${configFor(editorId).name}`);
-  if (changed && !confirm(dependencyWarning(editorId, "Save roster changes for"))) return;
   const source = {
-    ...(changed ? emptyResult(previous) : previous), ...roster,
+    ...(changed ? withoutResults(previous) : previous), ...roster,
     name: configFor(editorId).name, stage: configFor(editorId).stage,
     stageId: configFor(editorId).stage, formatVersion: 2, status: $("roomStatus").value
   };
-  await writeRoomChange(editorId, source, changed);
-  notify(changed ? "Room saved. Dependent feeders and leaderboard are up to date."
-    : "Room status saved. Scores are unchanged; use Recalculate leaderboard to refresh public usernames.", "success");
+  if (!changed) {
+    await writeRoomChange(editorId, source, [], null);
+    notify("Room status saved. Scores are unchanged; use Recalculate leaderboard to refresh public usernames.", "success");
+    return;
+  }
+  const action = `Saving roster changes for ${configFor(editorId).name}`;
+  assertNoPublishedDependents(editorId, action);
+  const resetIds = dependentResets(roomsCache, new Map([[editorId, source]]));
+  if (!confirm(dependencyWarning(editorId, "Save roster changes for", resetIds))) return;
+  const outcome = await writeRoomChange(editorId, source, resetIds, action);
+  notify(`Room saved. ${outcome.deleted} dependent prediction(s) deleted; dependent feeders and leaderboard are up to date.`, "success");
 }));
 
 $("publishRoomBtn").addEventListener("click", () => persist(async () => {
   const room = await freshEditor();
   requireInitialized();
-  assertNoPublishedDependents(editorId, `Publishing results for ${configFor(editorId).name}`);
+  const action = `Publishing results for ${configFor(editorId).name}`;
+  assertNoPublishedDependents(editorId, action);
   const config = configFor(editorId);
   const roster = readRoster();
   if (!same(room.players, roster.players) || !same(room.playerDetails || {}, roster.playerDetails)) {
@@ -649,21 +671,25 @@ $("publishRoomBtn").addEventListener("click", () => persist(async () => {
     notify("Results unchanged. Dependent rooms and all predictions were retained; leaderboard recalculated.", "success");
     return;
   }
-  if (!confirm(dependencyWarning(editorId, room.resultsPublished ? "Correct results for" : "Publish results for"))) return;
-  const deleted = await writeRoomChange(editorId, {
-    ...emptyResult(room), ...result, resultsPublishedAt: serverTimestamp()
-  }, true);
-  notify(`Results published. ${deleted} dependent prediction(s) deleted; this room’s predictions retained.`, "success");
+  const source = { ...withoutResults(room), ...result, resultsPublishedAt: serverTimestamp() };
+  const resetIds = dependentResets(roomsCache, new Map([[editorId, source]]));
+  if (!confirm(dependencyWarning(editorId, room.resultsPublished ? "Correct results for" : "Publish results for", resetIds))) return;
+  const outcome = await writeRoomChange(editorId, source, resetIds, action);
+  notify(`Results published. ${outcome.deleted} dependent prediction(s) deleted; this room’s predictions retained.` +
+    (resetIds.length ? "" : " Downstream results and predictions were unchanged."), "success");
 }));
 
 $("unpublishRoomBtn").addEventListener("click", () => persist(async () => {
   const room = await freshEditor();
   requireInitialized();
   if (!completed(room)) throw new Error("This room is already open.");
-  assertNoPublishedDependents(editorId, `Reopening ${configFor(editorId).name}`);
-  if (!confirm(reopenWarning(editorId))) return;
-  const deleted = await writeRoomChange(editorId, emptyResult(room), true);
-  notify(`Room reopened. Its roster and predictions were retained; ${deleted} dependent prediction(s) deleted.`, "success");
+  const action = `Reopening ${configFor(editorId).name}`;
+  assertNoPublishedDependents(editorId, action);
+  const source = withoutResults(room);
+  const resetIds = dependentResets(roomsCache, new Map([[editorId, source]]));
+  if (!confirm(reopenWarning(editorId, resetIds))) return;
+  const outcome = await writeRoomChange(editorId, source, resetIds, action);
+  notify(`Room reopened. Its roster and predictions were retained; ${outcome.deleted} dependent prediction(s) deleted.`, "success");
 }));
 
 $("initializeTournamentBtn").addEventListener("click", () => persist(async () => {
