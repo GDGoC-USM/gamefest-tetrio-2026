@@ -25,7 +25,7 @@
 
 .luckydraw-stat strong {
   color: #d5b0ff;
-  font-family: "Barlow Condensed", sans-serif;
+  font-family: 'Google Sans', sans-serif;
   font-size: 34px;
 }
 
@@ -42,7 +42,7 @@
 
 .luckydraw-heading h3 {
   margin: 8px 0;
-  font-family: "Barlow Condensed", sans-serif;
+  font-family: 'Google Sans', sans-serif;
   font-size: 32px;
   letter-spacing: .08em;
 }
@@ -100,7 +100,7 @@
 
   color: #ffffff;
 
-  font-family: "Barlow Condensed", sans-serif;
+  font-family: 'Google Sans', sans-serif;
 
   font-size: 10px;
   font-weight: 900;
@@ -154,7 +154,7 @@
 
 .luckydraw-wheel-center strong {
   color: #fff;
-  font-family: "Barlow Condensed", sans-serif;
+  font-family: 'Google Sans', sans-serif;
   font-size: 22px;
 }
 
@@ -181,7 +181,7 @@
 
 .luckydraw-winner strong {
   color: #fff;
-  font-family: "Barlow Condensed", sans-serif;
+  font-family: 'Google Sans', sans-serif;
   font-size: clamp(25px, 5vw, 38px);
   text-transform: uppercase;
   overflow-wrap: anywhere;

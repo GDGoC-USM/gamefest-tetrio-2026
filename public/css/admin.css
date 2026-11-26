@@ -23,6 +23,11 @@ body {
   color: var(--admin-text);
 }
 
+/* Keep administrator headings consistent with the public pages. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Google Sans', sans-serif;
+}
+
 /* HEADER */
 
 .admin-header {
