@@ -239,6 +239,20 @@ button, input, select, textarea {
   font-size: 11px;
 }
 
+.public-auth {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.public-auth p {
+  margin: 0 0 8px;
+}
+
+.public-auth .muted {
+  font-size: 13px;
+}
+
 /* =====================================
    GENERAL LAYOUT
 ===================================== */
@@ -383,12 +397,6 @@ p {
   margin-top: 25px;
 }
 
-.welcome-text {
-  color: #bcb4d9;
-  font-size: 12px;
-  margin-top: 22px;
-  overflow-wrap: anywhere;
-}
 
 .live-dot {
   display: inline-block;
@@ -2489,18 +2497,6 @@ footer {
    PREDICTION SELECTION STATES
 ========================================== */
 
-.prediction-auth-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin: 18px 0;
-}
-
-.prediction-auth-row p {
-  margin: 0;
-}
 
 .room-prediction-players .prediction-player {
   min-width: 0;
@@ -2544,16 +2540,6 @@ footer {
   opacity: .55;
 }
 
-@media (max-width: 650px) {
-  .prediction-auth-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .prediction-auth-row .btn {
-    width: 100%;
-  }
-}
 
 
 /* =========================================================

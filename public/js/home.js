@@ -1,30 +1,14 @@
 import {
-  auth, db, signIn, signOut, onAuthStateChanged,
+  db,
   collection, doc, onSnapshot, escapeHTML
 } from "./shared.js";
 import { ROOM_CONFIG, STAGES, deriveRooms, isPlayer, playerLabel, roomReady } from "./tournament.js";
-import { publicUsername } from "./usernames.js";
+import { initPublicAuth } from "./auth-ui.js";
 
-const authBtn = document.getElementById("authBtn");
-const welcome = document.getElementById("welcomeText");
 const grid = document.getElementById("roomGrid");
 const availability = {};
 
-authBtn.addEventListener("click", async () => {
-  try {
-    if (auth.currentUser) await signOut(auth);
-    else await signIn();
-  } catch (error) {
-    welcome.textContent = `Unable to change sign-in: ${error.message}`;
-  }
-});
-
-onAuthStateChanged(auth, user => {
-  authBtn.textContent = user ? "Sign out" : "Sign in with Google";
-  welcome.textContent = user
-    ? `Signed in as ${publicUsername(user.displayName)}`
-    : "Sign in with Google to save your predictions.";
-});
+initPublicAuth();
 
 STAGES.forEach(stage => {
   onSnapshot(doc(db, "settings", `rounds_${stage.id}`), snapshot => {
