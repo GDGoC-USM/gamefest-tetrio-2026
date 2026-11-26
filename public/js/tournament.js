@@ -123,6 +123,50 @@ export function dependentRoomIds(id) {
   visit(id);
   return ROOM_CONFIG.filter(config => found.has(config.id)).map(config => config.id);
 }
+export const hasPublishedResults = room =>
+  room?.resultsPublished === true || room?.status === "completed";
+// Published downstream rooms must be reopened before their feeder changes.
+// Reverse configuration order is a valid deepest-first sequence for that task.
+export function publishedDependentIds(id, rooms) {
+  const position = new Map(ROOM_CONFIG.map((config, index) => [config.id, index]));
+  return dependentRoomIds(id)
+    .filter(dependentId => hasPublishedResults(rooms[dependentId]))
+    .sort((left, right) => position.get(right) - position.get(left));
+}
+export function withoutResults(room) {
+  const clean = { ...room, status: "upcoming", resultsPublished: false };
+  for (const field of [
+    "qualifiers", "scores", "winner", "loser", "rounds", "totals", "placings",
+    "tied", "decision", "champion", "runnerUp", "secondRunnerUp", "resultsPublishedAt"
+  ]) delete clean[field];
+  return clean;
+}
+function samePlayerKeys(room, players) {
+  return Array.isArray(room?.players) && room.players.length === players.length
+    && room.players.every((key, index) => key === players[index]);
+}
+// Only feeder rooms whose confirmed players change are reset, so a result that keeps
+// the same progression leaves downstream results and audience predictions intact.
+export function dependentResets(rooms, sources) {
+  const changes = typeof sources?.[Symbol.iterator] === "function" ? Object.fromEntries(sources) : sources;
+  const working = { ...rooms, ...changes };
+  const sourceIds = new Set(Object.keys(changes));
+  const reset = new Set();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    const derived = deriveRooms(working);
+    for (const config of ROOM_CONFIG) {
+      if (!config.feeders || sourceIds.has(config.id) || reset.has(config.id)) continue;
+      const expected = derived[config.id];
+      if (samePlayerKeys(working[config.id], expected.players)) continue;
+      working[config.id] = withoutResults(working[config.id] || expected);
+      reset.add(config.id);
+      grew = true;
+    }
+  }
+  return ROOM_CONFIG.filter(config => reset.has(config.id)).map(config => config.id);
+}
 function predictedKeys(prediction, config) {
   if (config.kind === "group") return [...new Set((prediction.selectedPlayers || []).filter(isPlayer))].slice(0, 2);
   // Historical final podiums contribute only their champion pick to the new winner result.

@@ -147,6 +147,23 @@ REOPEN / UNPUBLISH RESULTS
 - Publish corrected results and regenerate the affected bracket from confirmed feeders.
 - A group affects its QFs, dependent SFs, FINAL, THIRD and PLACEMENT. A QF affects
   its SF, FINAL, THIRD and PLACEMENT. An SF affects FINAL and THIRD.
+- Reopen downstream rooms first. If any transitive dependent room still has published
+  results, publishing, correcting, reopening or re-rostering the upstream room is
+  blocked and nothing is changed. The dashboard lists the rooms to reopen, deepest
+  round first (FINAL, THIRD and PLACEMENT, then semi-finals, then quarter-finals,
+  then groups).
+- Only dependent rooms whose confirmed players actually change are reset. Correcting
+  a score without changing the winner keeps downstream results and audience picks.
+  The confirmation names the rooms that will reset, or says none will.
+- Room updates, the dependency re-check and the stale-state check commit in one
+  Firestore transaction, so a second administrator cannot publish a dependent
+  room between the check and the update. Dependent predictions are then looked up
+  and deleted in batches.
+- If prediction cleanup fails after the room state committed, the dashboard still
+  recalculates the leaderboard and reports how many predictions remain. Leftover
+  picks stay pending (no points) while their rooms are unpublished and are deleted
+  the next time those rooms are reset. If in doubt, press Recalculate leaderboard
+  and inspect the affected rooms before continuing.
 
 H. LEADERBOARD SCORING
 - Score only saved predictions against published, resolved results.

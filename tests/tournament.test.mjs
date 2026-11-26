@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { ROOM_CONFIG, deriveRooms, dependentRoomIds, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
+import { ROOM_CONFIG, deriveRooms, dependentRoomIds, publishedDependentIds, dependentResets, withoutResults, validateGroupResult, validateSeriesResult, validateFFAResult, calculateLeaderboard, scorePrediction, roomReady, playerLabel, isPlayer } from '../public/js/tournament.js';
 import { publicUsername } from '../public/js/usernames.js';
 
 function sample() {
@@ -114,6 +114,42 @@ test('reopening traverses winner and loser dependencies without unrelated matche
   assert.deepEqual(dependentRoomIds('PLACEMENT'), []);
 });
 
+test('published downstream rooms block reopening and are listed deepest first', () => {
+  const rooms = sample();
+  assert.deepEqual(publishedDependentIds('PLACEMENT', rooms), []);
+  assert.deepEqual(publishedDependentIds('A', rooms),
+    ['THIRD', 'FINAL', 'SF2', 'SF1', 'QF3', 'QF1']);
+  // Only published (or legacy completed) downstream rooms block; unrelated rooms never do.
+  for (const id of ['QF1', 'QF3', 'SF1', 'SF2', 'FINAL', 'THIRD', 'PLACEMENT']) {
+    rooms[id] = { ...rooms[id], resultsPublished: false, status: 'upcoming' };
+  }
+  assert.deepEqual(publishedDependentIds('A', rooms), []);
+  rooms.QF1 = { ...rooms.QF1, status: 'completed' };
+  rooms.PLACEMENT = { ...rooms.PLACEMENT, resultsPublished: true };
+  assert.deepEqual(publishedDependentIds('A', rooms), ['PLACEMENT', 'QF1']);
+  assert.deepEqual(publishedDependentIds('C', rooms), ['PLACEMENT', 'QF4', 'QF2']);
+});
+
+test('resets follow changed feeder players, preserving unchanged results and picks', () => {
+  const rooms = sample();
+  assert.deepEqual(dependentResets(rooms, {}), []);
+  // Identical republish and a correction that keeps the same winner change no progression.
+  assert.deepEqual(dependentResets(rooms, { QF1: { ...rooms.QF1 } }), []);
+  assert.deepEqual(dependentResets(rooms, { QF1: { ...rooms.QF1, scores: [7, 2] } }), []);
+  assert.deepEqual(dependentResets(rooms, { PLACEMENT: { ...rooms.PLACEMENT, resultsPublished: true } }), []);
+  // Flipping the winner changes SF1, then FINAL/THIRD, and PLACEMENT via the loser.
+  const flipped = { ...rooms.QF1, scores: [2, 7], winner: rooms.QF1.loser, loser: rooms.QF1.winner };
+  assert.deepEqual(dependentResets(rooms, { QF1: flipped }), ['SF1', 'FINAL', 'THIRD', 'PLACEMENT']);
+  // Reopening a group clears its seeds, so its whole subtree changes.
+  assert.deepEqual(dependentResets(rooms, { A: withoutResults(rooms.A) }),
+    ['QF1', 'QF3', 'SF1', 'SF2', 'FINAL', 'THIRD', 'PLACEMENT']);
+  const reopened = withoutResults(rooms.A);
+  assert.equal(reopened.status, 'upcoming');
+  assert.equal(reopened.resultsPublished, false);
+  assert.deepEqual(reopened.players, rooms.A.players);
+  assert.equal(reopened.qualifiers, undefined);
+});
+
 test('ended groups keep picks pending and advance nobody until results are published', () => {
   const rooms = sample();
   rooms.A.resultsPublished = false;
@@ -169,6 +205,7 @@ test('admin status saves remain separate from publishing and reopening official 
   const context = {
     ROOM_CONFIG, STAGES: [], isPlayer, playerLabel, roomReady, validateGroupResult,
     validateSeriesResult, validateFFAResult, deriveRooms, dependentRoomIds, calculateLeaderboard,
+    publishedDependentIds, dependentResets, withoutResults,
     document: { getElementById: element, querySelectorAll() { return []; } },
     auth: {}, onAuthStateChanged() {}, escapeHTML: value => String(value),
     showMessage() {}, confirm: () => true, serverTimestamp: () => 'server-time',
@@ -229,7 +266,8 @@ test('admin status saves remain separate from publishing and reopening official 
   assert.deepEqual(errors, []);
   assert.equal(writes[3].sources[0][1].resultsPublished, true);
   assert.equal(writes[3].sources[0][1].status, 'completed');
-  assert.deepEqual(writes[3].resetIds, dependentRoomIds('A'));
+  // Targeted resets: only feeders whose players actually change (QF1/QF3 scaffold slots).
+  assert.deepEqual(writes[3].resetIds, ['QF1', 'QF3']);
   assert.equal(recalculations, 1);
   assert.equal(element('saveRoomBtn').disabled, true);
   assert.equal(element('roomStatus').disabled, true);
@@ -243,7 +281,8 @@ test('admin status saves remain separate from publishing and reopening official 
   assert.equal(writes[4].sources[0][1].resultsPublished, false);
   assert.equal(writes[4].sources[0][1].predictionsLocked, true);
   assert.equal('qualifiers' in writes[4].sources[0][1], false);
-  assert.deepEqual(writes[4].resetIds, dependentRoomIds('A'));
+  // Reopening clears A's qualifiers; downstream scaffolds here were already empty, so nothing changes.
+  assert.deepEqual(writes[4].resetIds, []);
   assert.equal(recalculations, 2);
   assert.equal(element('unpublishRoomBtn').hidden, true);
 });
