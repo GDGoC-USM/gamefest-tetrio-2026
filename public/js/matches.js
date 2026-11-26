@@ -17,16 +17,16 @@ function currentRoom(config) {
     players: expected.players || [],
     playerDetails: { ...stored.playerDetails, ...expected.playerDetails },
     resultsPublished: confirmed && stored.resultsPublished === true,
-    status: confirmed ? stored.status : "upcoming"
+    status: stored.status === "completed" ? "completed" : confirmed ? stored.status : "upcoming"
   };
 }
 
 function statusOf(room) {
-  return room.resultsPublished === true ? "completed" : room.status === "live" ? "live" : "upcoming";
+  return room.resultsPublished === true || room.status === "completed" ? "completed" : room.status === "live" ? "live" : "upcoming";
 }
 
 function resultText(config, room) {
-  if (!room.resultsPublished) return "Results not yet published";
+  if (!room.resultsPublished) return room.status === "completed" ? "Ended — results pending" : "Results not yet published";
   if (config.kind === "group") {
     return (room.qualifiers || []).map((key, index) =>
       `${config.id}${index + 1}: ${playerLabel(room, key)}`).join(" · ") || "Qualifiers pending";
@@ -48,7 +48,7 @@ function card(config, bracket = false) {
       id="room-${config.id}" aria-label="${escapeHTML(config.name)}">
     <div class="match-card-top">
       <span class="match-number">${escapeHTML(config.id)}</span>
-      <span class="match-status status-${status}">${status.toUpperCase()}</span>
+      <span class="match-status status-${status}">${status === "completed" ? "ENDED" : status.toUpperCase()}</span>
     </div>
     <h3>${escapeHTML(config.name)}</h3>
     <p class="series-target">${config.kind === "series" ? `First to ${config.target} wins` : "8 slots · 2 ordered qualifiers"}</p>
@@ -70,7 +70,7 @@ function placementTable(config) {
   const filtered = currentFilter !== "all" && statusOf(room) !== currentFilter;
   return `<section class="placement-section ${filtered ? "filter-muted" : ""}" id="room-PLACEMENT">
     <div class="match-group-heading"><div><span class="match-group-label">PLACEMENT</span><h3>5TH–8TH PLAYOFF</h3></div>
-      <span class="pill">${statusOf(room).toUpperCase()}</span></div>
+      <span class="pill status-${statusOf(room)}">${statusOf(room) === "completed" ? "ENDED" : statusOf(room).toUpperCase()}</span></div>
     <p class="muted">Four quarter-final losers · five free-for-all rounds · 4 / 3 / 2 / 1 points per round. No audience predictions.</p>
     <div class="table-wrap"><table class="placement-table">
       <thead><tr><th>Place</th><th>Participant</th>${[1, 2, 3, 4, 5].map(round => `<th>R${round}</th>`).join("")}<th>Total</th></tr></thead>

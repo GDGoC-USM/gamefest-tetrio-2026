@@ -111,6 +111,37 @@ test('room prediction locks enforce allowed and denied Firestore requests', {
         await pick('audience', 'A', ['A1', 'A2'], user, 403);
       }
     });
+    await t.test('ended unpublished rooms deny creates, edits and current or legacy deletes independently', async () => {
+      await put('rooms/A', { ...room('A'), predictionsLocked: false });
+      await pick('audience', 'A', ['A1', 'A2'], user);
+      await put('predictions/legacy-ended', { uid: 'audience', matchId: 'A', pick: 'A1' });
+      const before = await request('GET', '/predictions/audience_A', undefined, user);
+      const legacyBefore = await request('GET', '/predictions/legacy-ended', undefined, user);
+      await patch('rooms/A', { status: 'completed' }, admin);
+      await pick('newcomer', 'A', ['A1', 'A2'], newcomer, 403);
+      await pick('audience', 'A', ['A1', 'A3'], user, 403);
+      await request('DELETE', '/predictions/audience_A', undefined, user, 403);
+      await request('DELETE', '/predictions/legacy-ended', undefined, user, 403);
+      await patch('predictions/legacy-ended', { pick: 'A2' }, user, 403);
+      assert.deepEqual(await request('GET', '/predictions/audience_A', undefined, user), before);
+      assert.deepEqual(await request('GET', '/predictions/legacy-ended', undefined, user), legacyBefore);
+      await pick('audience', 'B', ['B1', 'B3'], user);
+      await patch('rooms/A', { predictionsLocked: true }, admin);
+      await patch('rooms/A', { predictionsLocked: false }, admin);
+      await patch('settings/rounds_preliminary', { predictionsOpen: false }, admin);
+      await patch('settings/rounds_preliminary', { predictionsOpen: true }, admin);
+      await pick('audience', 'A', ['A1', 'A3'], user, 403);
+      await patch('rooms/A', { status: 'upcoming', predictionsLocked: true }, admin);
+      await pick('audience', 'A', ['A1', 'A3'], user, 403);
+      await patch('rooms/A', { predictionsLocked: false }, admin);
+      await patch('settings/rounds_preliminary', { predictionsOpen: false }, admin);
+      await pick('audience', 'A', ['A1', 'A3'], user, 403);
+      await patch('settings/rounds_preliminary', { predictionsOpen: true }, admin);
+      await pick('newcomer', 'A', ['A1', 'A2'], newcomer);
+      await pick('audience', 'A', ['A1', 'A3'], user);
+      await request('DELETE', '/predictions/audience_A', undefined, user);
+      await request('DELETE', '/predictions/legacy-ended', undefined, user);
+    });
     await t.test('head-to-head rooms enforce the same lock with confirmed feeders', async () => {
       for (const id of ['A', 'B']) await put(`rooms/${id}`, {
         ...room(id), resultsPublished: true, qualifiers: [`${id}1`, `${id}2`]
@@ -123,6 +154,17 @@ test('room prediction locks enforce allowed and denied Firestore requests', {
       await request('DELETE', '/predictions/audience_QF1', undefined, user, 403);
       await patch('rooms/QF1', { predictionsLocked: false }, admin);
       await pick('audience', 'QF1', ['B2'], user);
+      await put('predictions/legacy-series-ended', { uid: 'audience', matchId: 'QF1', pick: 'A1' });
+      await patch('rooms/QF1', { status: 'completed' }, admin);
+      await pick('newcomer', 'QF1', ['A1'], newcomer, 403);
+      await pick('audience', 'QF1', ['A1'], user, 403);
+      await request('DELETE', '/predictions/audience_QF1', undefined, user, 403);
+      await request('DELETE', '/predictions/legacy-series-ended', undefined, user, 403);
+      await patch('rooms/QF1', { status: 'upcoming' }, admin);
+      await pick('newcomer', 'QF1', ['A1'], newcomer);
+      await pick('audience', 'QF1', ['A1'], user);
+      await request('DELETE', '/predictions/audience_QF1', undefined, user);
+      await request('DELETE', '/predictions/legacy-series-ended', undefined, user);
     });
   } finally {
     const cleaned = await fetch(`${origin}/emulator/v1/${database}/documents`, { method: 'DELETE' });

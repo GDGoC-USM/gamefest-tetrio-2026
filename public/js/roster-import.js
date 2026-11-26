@@ -106,7 +106,7 @@ export function prepareRosterImport(entries, rooms) {
         previous.playerDetails?.[key]?.participantId === detail.participantId &&
         previous.playerDetails?.[key]?.username === detail.username);
     if (unchanged) continue;
-    if (previous.resultsPublished === true || previous.status === "completed") {
+    if (previous.resultsPublished === true) {
       throw new Error(`Group ${id} has published results. Reopen it explicitly before changing its roster.`);
     }
     changedRoomIds.push(id);
