@@ -143,6 +143,32 @@
 
     </section>
 
+    <section id="usernameEditor" class="card username-editor" aria-labelledby="usernameHeading" hidden>
+      <h2 id="usernameHeading">PUBLIC USERNAME</h2>
+      <p id="usernameWarning" class="muted">
+        Your username is public and appears on the leaderboard. Do not include your real name, email address or other personal information.
+      </p>
+      <p class="muted">You can change your username even when predictions are closed or locked.</p>
+      <p id="currentUsernameRow" hidden>Current public username: <strong id="currentUsername"></strong></p>
+
+      <form id="usernameForm" novalidate hidden>
+        <div class="field">
+          <label for="usernameInput">Public username</label>
+          <input id="usernameInput" name="username" type="text" autocomplete="nickname"
+            autocapitalize="none" spellcheck="false" required aria-invalid="false"
+            aria-describedby="usernameHint usernameWarning usernameError">
+          <p id="usernameHint" class="muted"></p>
+          <p id="usernameError" class="username-error" role="alert" hidden></p>
+        </div>
+        <div class="username-actions">
+          <button id="saveUsernameBtn" type="submit" class="btn">Save username</button>
+        </div>
+      </form>
+
+      <p id="usernameNotice" class="notice info" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+      <button id="retryUsernameBtn" type="button" class="btn secondary" hidden>Retry loading username</button>
+    </section>
+
     <!-- PREDICTION AREA -->
     <section class="home-section">
 

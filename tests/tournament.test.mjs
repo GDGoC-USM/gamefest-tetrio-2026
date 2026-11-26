@@ -40,7 +40,7 @@ test('points and Lucky Draw tickets are absolute 2, 2, then 1 after one correcti
   const predictions = ['QF1', 'FINAL'].map(roomId => ({ uid: 'viewer', displayName: 'Viewer', roomId, formatVersion: 2, selectedPlayers: [rooms[roomId].winner] }));
   assert.equal(calculateLeaderboard(predictions, rooms)[0].points, 2);
   Object.assign(rooms.FINAL, validateSeriesResult('FINAL', rooms.FINAL, [11, 2]));
-  assert.deepEqual(calculateLeaderboard(predictions, rooms)[0], { uid: 'viewer', displayName: 'Viewer', correct: 2, points: 2, pending: 0 });
+  assert.deepEqual(calculateLeaderboard(predictions, rooms)[0], { uid: 'viewer', displayName: 'Participant', correct: 2, points: 2, pending: 0 });
   Object.assign(rooms.FINAL, validateSeriesResult('FINAL', rooms.FINAL, [2, 11]));
   assert.equal(calculateLeaderboard(predictions, rooms)[0].points, 1);
   const legacy = { uid: 'old', roomId: 'FINAL', champion: rooms.FINAL.winner, runnerUp: rooms.FINAL.loser, secondRunnerUp: 'other' };
@@ -48,6 +48,21 @@ test('points and Lucky Draw tickets are absolute 2, 2, then 1 after one correcti
   assert.equal(calculateLeaderboard([...predictions, { ...predictions[0], formatVersion: undefined }], rooms)[0].points, 1);
   rooms.FINAL.resultsPublished = false;
   assert.deepEqual(scorePrediction(predictions[1], rooms), { correct: 0, pending: 1 });
+});
+
+test('prediction identity, including legacy emails, is never published as a leaderboard name', () => {
+  const rooms = sample();
+  const predictions = ['student@example.invalid', 'Google Identity', '<img src=x onerror=alert(1)>', '', undefined]
+    .map((displayName, index) => ({
+      uid: `synthetic-${index}`, displayName, email: 'private@example.invalid',
+      roomId: 'A', formatVersion: 2, selectedPlayers: rooms.A.qualifiers
+    }));
+  const before = structuredClone(predictions);
+  const rows = calculateLeaderboard(predictions, rooms);
+  assert.deepEqual(rows, predictions.map(prediction => ({
+    uid: prediction.uid, displayName: 'Participant', correct: 2, points: 2, pending: 0
+  })));
+  assert.deepEqual(predictions, before);
 });
 
 test('series reject ties, over-target, unfinished, negative, and fractional scores', () => {

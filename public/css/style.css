@@ -1941,6 +1941,62 @@ footer {
     margin: 15px 0;
 }
 
+/* The public username editor stays separate from prediction room updates. */
+.username-editor[hidden],
+.username-editor [hidden] {
+    display: none;
+}
+
+.username-editor {
+    margin-bottom: 40px;
+}
+
+.username-editor h2 {
+    margin: 0 0 12px;
+    font-size: 28px;
+}
+
+.username-editor p {
+    max-width: 70ch;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.username-editor form {
+    max-width: 640px;
+    margin-top: 18px;
+}
+
+.username-editor .field p {
+    margin: 0;
+    font-size: 12px;
+}
+
+.username-editor .username-error {
+    color: #ff9eb0;
+}
+
+.username-editor input[aria-invalid="true"] {
+    border-color: var(--red);
+}
+
+.username-editor input:focus-visible {
+    outline: 3px solid var(--blue);
+    outline-offset: 3px;
+}
+
+.username-editor .username-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+@media (max-width: 600px) {
+    .username-editor .btn {
+        width: 100%;
+    }
+}
+
 /* ==========================================
    LEADERBOARD HERO
 ========================================== */

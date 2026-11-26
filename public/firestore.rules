@@ -9,6 +9,28 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == "admin";
     }
+    function validUsername(value) {
+      return value is string
+        && value.size() >= 3 && value.size() <= 24
+        && value.matches("[A-Za-z0-9_-][A-Za-z0-9 _-]{1,22}[A-Za-z0-9_-]")
+        && value.matches(".*[A-Za-z0-9].*");
+    }
+    function validProfile(data) {
+      return data.keys().hasAll(["username", "updatedAt"])
+        && data.keys().hasOnly(["username", "updatedAt"])
+        && validUsername(data.username)
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+    function validLeaderboard(uid, data) {
+      return data.keys().hasAll(["uid", "displayName", "correct", "points", "pending", "rank", "updatedAt"])
+        && data.keys().hasOnly(["uid", "displayName", "correct", "points", "pending", "rank", "updatedAt"])
+        && data.uid == uid && validUsername(data.displayName)
+        && data.correct is int && data.correct >= 0
+        && data.points is int && data.points == data.correct
+        && data.pending is int && data.pending >= 0
+        && data.rank is int && data.rank >= 1
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
     function room(id) {
       return get(/databases/$(database)/documents/rooms/$(id)).data;
     }
@@ -110,6 +132,13 @@ service cloud.firestore {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
       allow write: if false;
     }
+    match /profiles/{uid} {
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow list: if isAdmin();
+      allow create, update: if signedIn() && validProfile(request.resource.data)
+        && (request.auth.uid == uid || (isAdmin() && request.resource.data.username == "Participant"));
+      allow delete: if false;
+    }
     match /rooms/{id} {
       allow read: if true;
       allow write: if isAdmin();
@@ -137,7 +166,8 @@ service cloud.firestore {
     }
     match /leaderboard/{uid} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() && validLeaderboard(uid, request.resource.data);
+      allow delete: if isAdmin();
     }
     match /ticketAwards/{id} {
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
