@@ -9,7 +9,7 @@ if (emulator && !/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(emulator)) {
   throw new Error('Profile tests require a loopback Firestore emulator.');
 }
 
-test('profiles and public leaderboard enforce username privacy and ownership', {
+test('profiles and public leaderboard enforce full-name safety and ownership', {
   skip: !emulator && 'Set FIRESTORE_EMULATOR_HOST to run isolated security-rule checks.'
 }, async t => {
   const project = `demo-profiles-${process.pid}-${Date.now()}`;
@@ -73,7 +73,7 @@ test('profiles and public leaderboard enforce username privacy and ownership', {
     assert.equal(loaded.status, 200, await loaded.text());
     await put('admins/organiser', { role: 'admin' });
 
-    await t.test('owners create and update only their own exact profile and may share usernames', async () => {
+    await t.test('owners create and update only their own exact full-name profile and may share names', async () => {
       await get('profiles/audience', user, 404);
       await profile('audience', 'First Player', user);
       await profile('audience', 'Second Player', user);
@@ -126,7 +126,7 @@ test('profiles and public leaderboard enforce username privacy and ownership', {
       await profile('audience', 'Owner Restored Name', user);
     });
 
-    await t.test('JS and rules share all valid and invalid username vectors on create and update', async () => {
+    await t.test('JS and RE2 rules share Unicode full-name and unsafe-input vectors on create and update', async () => {
       for (const [index, username] of VALID_USERNAMES.entries()) {
         const uid = `valid-${index}`;
         const credential = token(uid);
@@ -146,6 +146,19 @@ test('profiles and public leaderboard enforce username privacy and ownership', {
         await save(`leaderboard/${uid}`, row(uid), admin);
         await save(`leaderboard/${uid}`, row(uid, { displayName: username }), admin, 403);
       }
+    });
+
+    await t.test('Unicode owner defaults and later edits retain the exact private profile schema', async () => {
+      const uid = 'google-default';
+      const credential = token(uid);
+      await profile(uid, 'José O’Neill', credential);
+      const initial = await get(`profiles/${uid}`, credential);
+      assert.equal(initial.fields.username.stringValue, 'José O’Neill');
+      assert.deepEqual(Object.keys(initial.fields).sort(), ['updatedAt', 'username']);
+      await profile(uid, '李 小龍', credential);
+      assert.equal((await get(`profiles/${uid}`, credential)).fields.username.stringValue, '李 小龍');
+      await profile(uid, 'private@example.test', credential, 403);
+      assert.equal((await get(`profiles/${uid}`, credential)).fields.username.stringValue, '李 小龍');
     });
 
     await t.test('profile schemas, timestamps and partial updates cannot bypass create or update validation', async () => {
@@ -242,7 +255,7 @@ test('profiles and public leaderboard enforce username privacy and ownership', {
       await request('DELETE', '/leaderboard/zero-score', undefined, admin);
     });
 
-    await t.test('username saves leave private predictions and locked-room snapshots unchanged', async () => {
+    await t.test('full-name saves leave private predictions and locked-room snapshots unchanged', async () => {
       await put('settings/rounds_preliminary', { predictionsOpen: true });
       await put('rooms/A', { players: Array.from({ length: 8 }, (_, index) => `A${index + 1}`),
         formatVersion: 2, resultsPublished: false, status: 'upcoming', predictionsLocked: false });
@@ -259,12 +272,12 @@ test('profiles and public leaderboard enforce username privacy and ownership', {
       await query('predictions', user, 200, { where: equal('uid', encode('audience')) });
       await get('predictions/audience_A', admin);
       await query('predictions', admin);
-      await profile('audience', 'Before Lock Name', user);
+      await profile('audience', 'José O’Neill', user);
       assert.deepEqual(await get('predictions/audience_A', user), before);
       await put('rooms/A', { players: Array.from({ length: 8 }, (_, index) => `A${index + 1}`),
         formatVersion: 2, resultsPublished: false, status: 'upcoming', predictionsLocked: true }, admin);
       const locked = await get('rooms/A', user);
-      await profile('audience', 'After Lock Name', user);
+      await profile('audience', '李 小龍', user);
       await profile('audience', 'Participant', admin);
       await save('predictions/audience_A', { ...pick, selectedPlayers: ['A3', 'A4'] }, user, 403);
       await request('DELETE', '/predictions/audience_A', undefined, user, 403);

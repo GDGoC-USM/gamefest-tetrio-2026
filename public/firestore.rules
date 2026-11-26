@@ -11,9 +11,9 @@ service cloud.firestore {
     }
     function validUsername(value) {
       return value is string
-        && value.size() >= 3 && value.size() <= 24
-        && value.matches("[A-Za-z0-9_-][A-Za-z0-9 _-]{1,22}[A-Za-z0-9_-]")
-        && value.matches(".*[A-Za-z0-9].*");
+        && value.matches("[\\p{L}\\p{M}\\p{N} .,'’·()_-]{3,80}")
+        && !value.matches(" .*") && !value.matches(".* ")
+        && value.matches(".*[\\p{L}\\p{N}].*");
     }
     function validProfile(data) {
       return data.keys().hasAll(["username", "updatedAt"])
