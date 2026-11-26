@@ -1,3 +1,5 @@
+import { DEFAULT_USERNAME } from "./usernames.js";
+
 // Player strings are immutable storage keys. Display metadata never changes a pick.
 export const ROOM_CONFIG = [
   ...["A", "B", "C", "D"].map(id => ({ id, name: `Group ${id}`, stage: "preliminary", size: 8, kind: "group" })),
@@ -156,7 +158,8 @@ export function calculateLeaderboard(predictions, rooms) {
   }
   const people = new Map();
   for (const prediction of latest.values()) {
-    const person = people.get(prediction.uid) || { uid: prediction.uid, displayName: prediction.displayName || "Player", correct: 0, points: 0, pending: 0 };
+    // Account identity and legacy prediction names are never public-name sources.
+    const person = people.get(prediction.uid) || { uid: prediction.uid, displayName: DEFAULT_USERNAME, correct: 0, points: 0, pending: 0 };
     const score = scorePrediction(prediction, rooms);
     person.correct += score.correct;
     person.points = person.correct;

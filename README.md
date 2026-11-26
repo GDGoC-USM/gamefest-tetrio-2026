@@ -10,7 +10,7 @@ A tournament management and audience prediction website for GameFest. Visitors f
 - Firebase Hosting for serving the `public/` directory.
 - Firebase JavaScript SDK 11.10.0, imported directly from Google's CDN.
 
-There is no `package.json`, build step, or GitHub Actions deployment workflow. The pure tournament regression scenarios use Node's built-in test runner; no dependencies are needed to run them.
+There is no `package.json` or build step. Pure regression scenarios use Node's built-in test runner; no dependencies are needed to run them. The checked-in GitHub workflows deploy Firebase Hosting previews for pull requests and the live site on pushes to `main`; do not push or open a PR without authorisation.
 
 ## Project structure
 
@@ -42,12 +42,13 @@ There is no `package.json`, build step, or GitHub Actions deployment workflow. T
         ├── home.js             Homepage data and sign-in controls
         ├── matches.js          Public room and result display
         ├── predict.js          Prediction selection, saving, and room updates
+        ├── usernames.js        Public username validation and safe fallback
         ├── leaderboard.js      Public leaderboard display
         ├── admin.js            Room management, bracket generation, and scoring
         └── luckydraw.js        Ticket selection and winner history
 ```
 
-Page scripts share Firebase access through `shared.js`. The main Firestore collections are `rooms`, `settings`, `predictions`, `leaderboard`, `admins`, and `ticketAwards`. Rules accept new room-based predictions only; legacy records remain readable and are rescored where applicable.
+Page scripts share Firebase access through `shared.js`. The main Firestore collections are `rooms`, `settings`, `profiles`, `predictions`, `leaderboard`, `admins`, and `ticketAwards`. Rules accept new room-based predictions only; legacy records remain readable and are rescored where applicable.
 
 ## Tournament behavior
 
@@ -63,6 +64,33 @@ Reopening results clears the room's results, retains its players and own predict
 Room locks use `rooms/<id>.predictionsLocked`. Only `true` locks a room; a missing field means unlocked for backward compatibility. New rooms start unlocked. Stage toggles, roster changes, publishing/reopening results and format migration retain explicit locks, including locks on dependent rooms. Changing a lock alone never changes match status, results, bracket dependencies or saved predictions. `PLACEMENT` has no predictions or lock control.
 
 Player references remain stable legacy string keys in `rooms/<id>.players`. Separate `playerDetails[key]` fields hold a text participant ID (preserving leading zeroes) and a trimmed username. Organisers enter the roster in the admin dashboard; never commit a real roster. Initialising/migrating the tournament requires explicit destructive confirmation in the admin dashboard; it never runs automatically on page load.
+
+## Public usernames and privacy
+
+On the prediction page, signed-in viewers can save a public username independently of predictions, including while predictions are locked. Names contain 3–24 characters: English letters (A–Z, a–z), numbers, spaces, underscores and hyphens, with at least one letter or number. Ordinary spaces at the edges are trimmed; control characters, line breaks, non-ASCII characters and other whitespace are rejected. Duplicate names are allowed.
+
+`profiles/<uid>` stores exactly `username` and `updatedAt` (a server timestamp). Owners can retrieve and save their own profile, but cannot list profiles or read another person's profile. Authorised administrators can retrieve individual profiles and list profiles. They can reset another account's name only to `Participant`, not assign an arbitrary replacement. Clients cannot delete profiles or grant administrative roles.
+
+The prediction page reads the profile once per sign-in/session load, not through a real-time listener. It clears profile state on sign-out or account switching. Changing a name never changes Google/Firebase Authentication identity, saved predictions, scores or ticket ownership. Names become public at the next successful administrator leaderboard recalculation, not immediately.
+
+Under **Admin → Prediction Settings → Public username moderation**, select **Load usernames**, select the name/account UID, and confirm **Reset username to Participant**. Recalculate the leaderboard when ready. Users may choose another name afterwards; permanent restrictions and automatic filtering are not implemented.
+
+Leaderboard names come only from valid profiles or `Participant`, never Google identity, email or legacy prediction names. The required prediction `displayName` compatibility field is saved as `Participant`; existing private predictions are not rewritten. Public rendering also replaces invalid stored names with `Participant` and escapes HTML.
+
+The public `leaderboard/<uid>` schema is exactly:
+
+| Field | Value |
+| --- | --- |
+| `uid` | Permanent Firebase UID, equal to the document ID |
+| `displayName` | Valid profile username, otherwise `Participant` |
+| `correct` | Non-negative integer correct-pick/ticket count |
+| `points` | Equal to `correct` |
+| `pending` | Non-negative integer unresolved-pick count |
+| `rank` | Existing sequential persisted rank |
+| `updatedAt` | Server timestamp of the last persisted change |
+
+Public equal-score rows retain shared ranks and alphabetical name ordering, then UID ordering. Renaming may change ordering within ties, but never scores or ticket ownership. Recalculation replaces documents without merging, removing stale names and unexpected fields. Hiding an invalid name in the UI does **not** remove the underlying publicly readable document fields; production inspection or repair needs separate authorisation. No automatic production cleanup is provided.
+
 
 ## Getting started
 
@@ -227,15 +255,44 @@ firebase emulators:exec --only firestore --project demo-gamefest "node --test te
 
 Java 21 is required. The test skips without `FIRESTORE_EMULATOR_HOST`, rejects non-loopback emulator hosts, loads the checked-in rules and cleans up its own fixture documents. It covers room-lock create/update/delete denial, legacy resets, administrator-only lock changes, independent rooms, stage/result/readiness restrictions and head-to-head predictions. Inspect live updates and controls in the browser separately.
 
-## Deployment
-
-Deployment is a maintainer action after review. Confirm `.firebaserc` and `public/js/firebase-config.js` refer to the intended project, then run:
+Username validation and privacy regressions:
 
 ```sh
-firebase deploy --only hosting,firestore:rules
+node --test tests/usernames.test.mjs tests/tournament.test.mjs
+firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs"
 ```
 
-Pushing to GitHub does not deploy the site with the current repository configuration. Any future GitHub/Firebase deployment integration must be configured separately, with credentials stored in the platform's secret store rather than committed files.
+The username unit and rule tests share the same validation cases. Rule tests use unique disposable demo projects, reject non-loopback hosts, and cover owner/admin access, forbidden listing, moderation, field allowlists, public leaderboard reads and private predictions. Without `FIRESTORE_EMULATOR_HOST`, rule tests explicitly skip; a skip or static inspection does not prove runtime enforcement. If Java 21 or later is unavailable, run the unit command and report the emulator tests as unexecuted.
+
+Browser checklist on the local Auth/Firestore/Hosting emulators:
+
+- Desktop and mobile: sign in with a synthetic Google account, save a valid name, refresh and verify persistence; confirm Google identity is unchanged.
+- Try too-short/long names, email, HTML, punctuation-only, Unicode, control characters and line breaks; verify clear validation guidance.
+- Save a name with predictions locked; confirm the saved predictions and scores remain unchanged.
+- Sign out and switch accounts during loading/saving; confirm no previous profile state remains.
+- As administrator, load names, cancel a reset, then confirm a reset; verify it appears only after recalculation.
+- With synthetic stale leaderboard names/fields, recalculate and inspect the local documents for the exact public schema.
+- Verify unauthorized profile/leaderboard requests in rule tests, not just hidden UI controls.
+
+
+## Deployment
+
+Deployment is a maintainer action after review and explicit authorisation. Do not change the configured Firebase project or deployment targets.
+
+For this release, pause administrator result changes, recalculations and draw refreshes during the cutover. Deploy the **rules first**, then Hosting:
+
+```sh
+firebase deploy --only firestore:rules --project gamefest-tetrio-2026
+firebase deploy --only hosting --project gamefest-tetrio-2026
+```
+
+Rules-first prevents the new editor from running against rules that deny all profiles. Prediction writes retain their existing schema, so existing prediction clients remain compatible. Old admin tabs may fail the stricter leaderboard validation; close/reload them before resuming operations. If the Hosting deploy fails, leave the stricter rules in place and finish the Hosting deployment rather than weakening privacy validation.
+
+After Hosting deploys, require administrators to reload the dashboard. Verify access with approved accounts before resuming operations. A maintainer must separately authorise any production recalculation that replaces stale public names/fields; deployment alone does not clean existing Firestore documents. Do not inspect or repair production data merely to verify this release.
+
+Rollback: revert application commits in reverse order, but review the privacy impact before restoring older code or rules. Old recalculation code can republish prediction identities. Keep private profiles private; do not delete profiles, predictions or draw history as a rollback shortcut. Prefer a privacy-preserving forward fix over restoring the original leak.
+
+Pushes to `main` trigger a live Hosting deployment; pull requests trigger a preview. No branch push, PR, deployment or production-data operation is part of local verification.
 
 ## AI contributors
 

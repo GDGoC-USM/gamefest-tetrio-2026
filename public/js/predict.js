@@ -1,14 +1,25 @@
 import {
   auth, db, signIn, signOut, onAuthStateChanged, collection, doc,
-  onSnapshot, setDoc, deleteDoc, serverTimestamp, escapeHTML, query, where
+  onSnapshot, getDoc, setDoc, deleteDoc, serverTimestamp, escapeHTML, query, where
 } from "./shared.js";
 import {
   ROOM_CONFIG, STAGES, deriveRooms, isPlayer, playerLabel, roomReady, scorePrediction
 } from "./tournament.js";
+import { DEFAULT_USERNAME, normalizeUsername, isValidUsername, publicUsername, USERNAME_HINT } from "./usernames.js";
 
 const host = document.getElementById("predictionList");
 const notice = document.getElementById("predictNotice");
 const authBtn = document.getElementById("authBtn");
+const usernameEditor = document.getElementById("usernameEditor");
+const usernameForm = document.getElementById("usernameForm");
+const usernameInput = document.getElementById("usernameInput");
+const usernameHint = document.getElementById("usernameHint");
+const usernameError = document.getElementById("usernameError");
+const usernameNotice = document.getElementById("usernameNotice");
+const currentUsernameRow = document.getElementById("currentUsernameRow");
+const currentUsername = document.getElementById("currentUsername");
+const saveUsernameBtn = document.getElementById("saveUsernameBtn");
+const retryUsernameBtn = document.getElementById("retryUsernameBtn");
 const configurations = ROOM_CONFIG.filter(config => config.kind !== "ffa");
 const configById = Object.fromEntries(configurations.map(config => [config.id, config]));
 let rooms = {};
@@ -23,6 +34,108 @@ let operations = new Map();
 let authEpoch = 0;
 let loadingPredictions = false;
 let unsubscribePredictions = null;
+let usernameLoaded = false;
+let usernameBusy = false;
+
+usernameHint.textContent = USERNAME_HINT;
+
+function showUsernameNotice(message, type = "info") {
+  usernameNotice.textContent = message;
+  usernameNotice.className = `notice ${type}`;
+  usernameNotice.hidden = !message;
+}
+
+function clearUsernameError() {
+  usernameInput.setAttribute("aria-invalid", "false");
+  usernameError.textContent = "";
+  usernameError.hidden = true;
+}
+
+function setUsernameBusy(busy) {
+  usernameBusy = busy;
+  usernameForm.setAttribute("aria-busy", String(busy));
+  usernameInput.disabled = busy || !usernameLoaded;
+  saveUsernameBtn.disabled = busy || !usernameLoaded;
+  retryUsernameBtn.disabled = busy;
+}
+
+function resetUsernameEditor(user) {
+  usernameEditor.hidden = !user;
+  usernameForm.hidden = true;
+  currentUsernameRow.hidden = true;
+  currentUsername.textContent = "";
+  usernameInput.value = "";
+  usernameLoaded = false;
+  retryUsernameBtn.hidden = true;
+  clearUsernameError();
+  showUsernameNotice("");
+  setUsernameBusy(false);
+}
+
+async function loadUsernameProfile(user, epoch) {
+  if (epoch !== authEpoch || currentUser?.uid !== user.uid || usernameBusy || usernameLoaded) return;
+  setUsernameBusy(true);
+  retryUsernameBtn.hidden = true;
+  showUsernameNotice("Loading your public username…");
+  try {
+    const snapshot = await getDoc(doc(db, "profiles", user.uid));
+    if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
+    const username = publicUsername(snapshot.exists() ? snapshot.data().username : undefined);
+    currentUsername.textContent = username;
+    usernameInput.value = username;
+    usernameLoaded = true;
+    currentUsernameRow.hidden = false;
+    usernameForm.hidden = false;
+    showUsernameNotice("");
+  } catch (error) {
+    if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
+    showUsernameNotice("Unable to load your public username. Retry loading it before editing.", "error");
+    retryUsernameBtn.hidden = false;
+  } finally {
+    if (epoch === authEpoch && currentUser?.uid === user.uid) {
+      setUsernameBusy(false);
+    }
+  }
+}
+
+usernameInput.addEventListener("input", clearUsernameError);
+
+retryUsernameBtn.addEventListener("click", () => {
+  if (currentUser) void loadUsernameProfile(currentUser, authEpoch);
+});
+
+usernameForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser || !usernameLoaded || usernameBusy) return;
+  const user = currentUser;
+  const epoch = authEpoch;
+  const username = normalizeUsername(usernameInput.value);
+  clearUsernameError();
+  if (!isValidUsername(username)) {
+    showUsernameNotice("");
+    usernameInput.setAttribute("aria-invalid", "true");
+    usernameError.textContent = USERNAME_HINT;
+    usernameError.hidden = false;
+    usernameInput.focus();
+    return;
+  }
+  setUsernameBusy(true);
+  showUsernameNotice("Saving your username…");
+  try {
+    await setDoc(doc(db, "profiles", user.uid), { username, updatedAt: serverTimestamp() });
+    if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
+    currentUsername.textContent = username;
+    usernameInput.value = username;
+    showUsernameNotice("Username saved. Your new name will appear on the leaderboard after the next leaderboard update.", "success");
+  } catch (error) {
+    if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
+    showUsernameNotice("Unable to save your username. Try saving again.", "error");
+  } finally {
+    if (epoch === authEpoch && currentUser?.uid === user.uid) {
+      setUsernameBusy(false);
+    }
+  }
+});
 
 function showNotice(message, type = "info") {
   notice.textContent = message;
@@ -97,7 +210,7 @@ async function savePrediction(id) {
   const operation = {};
   const payload = {
     uid: user.uid, roomId: id, stageId: config.stage, formatVersion: 2,
-    displayName: user.displayName || user.email || "Participant",
+    displayName: DEFAULT_USERNAME,
     selectedPlayers, updatedAt: serverTimestamp()
   };
   operations.set(id, operation);
@@ -272,6 +385,7 @@ onAuthStateChanged(auth, user => {
   unsubscribePredictions?.();
   unsubscribePredictions = null;
   currentUser = user;
+  resetUsernameEditor(user);
   saved = {};
   savedDocumentIds = {};
   picks = {};
@@ -282,6 +396,7 @@ onAuthStateChanged(auth, user => {
   showNotice(user ? "Loading your saved predictions…" : "Sign in with Google to save predictions.");
   render();
   if (!user) return;
+  void loadUsernameProfile(user, epoch);
   unsubscribePredictions = onSnapshot(query(collection(db, "predictions"), where("uid", "==", user.uid)), snapshot => {
     if (epoch !== authEpoch || currentUser?.uid !== user.uid) return;
     const next = {};

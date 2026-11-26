@@ -1,4 +1,5 @@
 import { db, collection, onSnapshot, escapeHTML } from "./shared.js";
+import { publicUsername } from "./usernames.js";
 
 const body = document.getElementById("leaderboardBody");
 const note = document.getElementById("leaderboardNote");
@@ -8,7 +9,7 @@ onSnapshot(collection(db, "leaderboard"), snapshot => {
   const rows = snapshot.docs.map(document => {
     const data = document.data();
     const correct = Number.isInteger(data.correct) && data.correct >= 0 ? data.correct : 0;
-    return { uid: document.id, displayName: data.displayName || "Participant", correct, points: correct };
+    return { uid: document.id, displayName: publicUsername(data.displayName), correct, points: correct };
   });
   rows.sort((a, b) => b.points - a.points || a.displayName.localeCompare(b.displayName) || a.uid.localeCompare(b.uid));
   if (!rows.length) {

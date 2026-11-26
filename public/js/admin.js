@@ -1,7 +1,7 @@
 import {
   auth, db, signIn, signInWithEmailAndPassword, signOut, onAuthStateChanged,
   isAdmin, collection, doc, getDoc, getDocs, setDoc, writeBatch,
-  serverTimestamp, escapeHTML, showMessage
+  serverTimestamp, escapeHTML, showMessage, query, where
 } from "./shared.js";
 import {
   ROOM_CONFIG, STAGES, isPlayer, playerLabel, roomReady,
@@ -9,6 +9,7 @@ import {
   deriveRooms, dependentRoomIds, calculateLeaderboard
 } from "./tournament.js";
 import { parseRosterCSV, prepareRosterImport } from "./roster-import.js";
+import { DEFAULT_USERNAME, publicUsername } from "./usernames.js";
 
 const $ = id => document.getElementById(id);
 const adminLogin = $("adminLogin");
@@ -22,6 +23,8 @@ let editorId = "";
 let busy = false;
 let authorized = false;
 let rosterPreview = null;
+let adminAuthEpoch = 0;
+let moderationProfiles = new Map();
 const configFor = id => ROOM_CONFIG.find(config => config.id === id);
 const stableJSON = value => JSON.stringify(value, (_key, item) =>
   item && typeof item === "object" && !Array.isArray(item)
@@ -58,6 +61,7 @@ async function persist(action) {
     $("saveRoomBtn").disabled = completed(editorRoom);
     $("roomStatus").disabled = completed(editorRoom);
     $("saveRosterImportBtn").disabled = !rosterPreview?.plan.changedRoomIds.length;
+    $("resetUsernameBtn").disabled = !authorized || !moderationProfiles.has($("moderationUid").value);
   }
 }
 
@@ -109,8 +113,10 @@ authBtn.addEventListener("click", async () => {
 });
 
 onAuthStateChanged(auth, async user => {
+  const epoch = ++adminAuthEpoch;
   authorized = false;
   clearRosterPreview();
+  clearUsernameModeration();
   adminLogin.hidden = true;
   adminContent.hidden = true;
   authBtn.hidden = false;
@@ -125,7 +131,9 @@ onAuthStateChanged(auth, async user => {
     return;
   }
   try {
-    if (!await isAdmin(user)) {
+    const permitted = await isAdmin(user);
+    if (epoch !== adminAuthEpoch || auth.currentUser?.uid !== user.uid) return;
+    if (!permitted) {
       await signOut(auth);
       notify("Access denied. This account is not an administrator.", "error");
       return;
@@ -134,11 +142,14 @@ onAuthStateChanged(auth, async user => {
     adminContent.hidden = false;
     await persist(async () => {
       await Promise.all([fetchRooms(), loadSettings()]);
+      if (epoch !== adminAuthEpoch || !authorized) return;
       renderRooms();
       await recalculateLeaderboard();
+      if (epoch !== adminAuthEpoch || !authorized) return;
       notify("Admin access verified. Rooms are unchanged; leaderboard recalculated.", "success");
     });
   } catch (error) {
+    if (epoch !== adminAuthEpoch) return;
     authorized = false;
     adminContent.hidden = true;
     adminLogin.hidden = false;
@@ -667,6 +678,63 @@ $("initializeTournamentBtn").addEventListener("click", () => persist(async () =>
   notify("Tournament format initialized. Group data and group predictions were retained.", "success");
 }));
 
+function clearUsernameModeration() {
+  moderationProfiles = new Map();
+  $("moderationUid").innerHTML = '<option value="">Load usernames first</option>';
+  $("resetUsernameBtn").disabled = true;
+  $("moderationMessage").textContent = "";
+}
+
+function renderUsernameModeration(selected = "") {
+  const profiles = [...moderationProfiles].sort((left, right) =>
+    left[1].localeCompare(right[1]) || left[0].localeCompare(right[0]));
+  $("moderationUid").innerHTML = '<option value="">Select a public username</option>' +
+    profiles.map(([uid, username]) =>
+      `<option value="${escapeHTML(uid)}">${escapeHTML(username)} · ${escapeHTML(uid)}</option>`).join("");
+  $("moderationUid").value = moderationProfiles.has(selected) ? selected : "";
+  $("resetUsernameBtn").disabled = !moderationProfiles.has($("moderationUid").value);
+}
+
+$("moderationUid").addEventListener("change", () => {
+  $("resetUsernameBtn").disabled = !authorized || !moderationProfiles.has($("moderationUid").value);
+});
+
+$("loadUsernamesBtn").addEventListener("click", () => persist(async () => {
+  const epoch = adminAuthEpoch;
+  showMessage($("moderationMessage"), "Loading public usernames…");
+  const snapshot = await getDocs(collection(db, "profiles"));
+  if (epoch !== adminAuthEpoch || !authorized) return;
+  moderationProfiles = new Map(snapshot.docs.map(item => [item.id, publicUsername(item.data().username)]));
+  renderUsernameModeration();
+  showMessage($("moderationMessage"), moderationProfiles.size
+    ? "Select a username to reset. UIDs distinguish accounts with duplicate names."
+    : "No saved usernames yet.");
+}));
+
+$("resetUsernameBtn").addEventListener("click", () => persist(async () => {
+  const uid = $("moderationUid").value;
+  if (!moderationProfiles.has(uid)) return;
+  if (!confirm(`Reset ${moderationProfiles.get(uid)} (${uid}) to ${DEFAULT_USERNAME}?\n\n` +
+    "Predictions, points and Lucky Draw tickets will not change. The user may choose a new name later.")) return;
+  const epoch = adminAuthEpoch;
+  await setDoc(doc(db, "profiles", uid), { username: DEFAULT_USERNAME, updatedAt: serverTimestamp() });
+  if (epoch !== adminAuthEpoch || !authorized) return;
+  moderationProfiles.set(uid, DEFAULT_USERNAME);
+  renderUsernameModeration(uid);
+  showMessage($("moderationMessage"),
+    "Username reset. It will appear on the leaderboard after the next successful recalculation.", "success");
+}));
+
+async function readLeaderboardUsernames(uids) {
+  const usernames = new Map();
+  for (let index = 0; index < uids.length; index += 30) {
+    const snapshot = await getDocs(query(collection(db, "profiles"),
+      where("__name__", "in", uids.slice(index, index + 30))));
+    snapshot.docs.forEach(item => usernames.set(item.id, publicUsername(item.data().username)));
+  }
+  return usernames;
+}
+
 async function recalculateLeaderboard() {
   const [predictionSnapshot, roomSnapshot, leaderboardSnapshot] = await Promise.all([
     getDocs(collection(db, "predictions")), getDocs(collection(db, "rooms")),
@@ -674,8 +742,10 @@ async function recalculateLeaderboard() {
   ]);
   const rooms = Object.fromEntries(roomSnapshot.docs.map(item => [item.id, item.data()]));
   const predictions = predictionSnapshot.docs.map(item => ({ ...item.data(), id: item.id }));
-  const rows = calculateLeaderboard(predictions, rooms).sort((left, right) =>
-    right.correct - left.correct || left.displayName.localeCompare(right.displayName));
+  const rows = calculateLeaderboard(predictions, rooms);
+  const usernames = await readLeaderboardUsernames(rows.map(row => row.uid));
+  rows.forEach(row => { row.displayName = usernames.get(row.uid) || DEFAULT_USERNAME; });
+  rows.sort((left, right) => right.correct - left.correct || left.displayName.localeCompare(right.displayName));
   const retained = new Set(rows.map(row => row.uid));
   // Ranking writes are absolute and independently repeatable; bracket mutations above are one atomic batch.
   const operations = rows.map((row, index) => batch => batch.set(doc(db, "leaderboard", row.uid), {

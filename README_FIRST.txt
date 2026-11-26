@@ -89,6 +89,12 @@ F. AUDIENCE FEATURES
 - Legacy semi-final/final predictions are reevaluated against confirmed winners
   without old bonuses or podium scoring.
 - Users can view the public leaderboard.
+- Signed-in viewers can edit their public username on the prediction page, even
+  while predictions are locked. Use 3-24 characters: English letters, numbers,
+  spaces, underscores or hyphens, including at least one letter or number.
+- Usernames are separate profiles linked by UID; Google identity is unchanged.
+  Names appear after the next successful leaderboard recalculation.
+  Missing/invalid names use Participant, never account emails or prediction names.
 
 G. ADMINISTRATOR FEATURES
 - On first setup or migration, explicitly confirm destructive initialisation in admin.
@@ -140,6 +146,14 @@ H. LEADERBOARD SCORING
   Saving the same result again is idempotent; corrections can reduce scores.
 - Unresolved picks remain pending. Ignore FFA placements for prediction scoring.
 - Deduplicate legacy/new predictions for the same user and room to avoid double credit.
+- Public names come from valid private profiles, never saved prediction identity.
+  Profile changes do not change scores or ticket ownership.
+- Admin > Prediction Settings > Public username moderation: Load usernames,
+  select an account UID, and confirm Reset username to Participant. The user may
+  choose another name. Recalculate when ready to publish the reset.
+- Leaderboard replacement removes unexpected public fields. Rendering an invalid
+  name as Participant does not remove the stored public data; any production
+  inspection or recalculation for cleanup requires separate authorisation.
 
 I. LUCKY DRAW
 The administrator dashboard includes a Lucky Draw module. It is separate from the points leaderboard.
@@ -159,6 +173,10 @@ IMPORTANT NOTES
 - Predictions for the reopened room are retained; predictions for dependent rooms are removed when those rooms are reset.
 - Test publishing, reopening, feeders, scoring and Lucky Draw undo with synthetic data
   on the isolated local emulators before using the site for a live event.
+- For username/privacy releases, pause admin result/draw operations, deploy
+  firestore:rules before hosting, and reload all admin tabs before resuming.
+  New profiles require the new rules; old admin tabs may fail stricter leaderboard
+  validation. See README.md for exact deployment commands and rollback cautions.
 - Firebase quotas and pricing may change; consult Firebase documentation for current limits.
 
 ORGANISER CONFIRMATIONS BEFORE THE EVENT

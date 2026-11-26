@@ -355,6 +355,21 @@
           <button type="button" class="btn secondary" id="recalculateLeaderboardBtn">Recalculate leaderboard</button>
           <p class="muted">Replaces all scores with absolute correct-pick totals, including legacy predictions. Refresh Lucky Draw tickets after recalculation.</p>
         </div>
+
+        <div class="admin-card">
+          <h3>Public username moderation</h3>
+          <p>Reset an inappropriate audience username to Participant. Predictions, scores and Lucky Draw tickets are retained. The user can choose another name later.</p>
+          <button type="button" class="btn secondary" id="loadUsernamesBtn">Load usernames</button>
+          <div class="field">
+            <label for="moderationUid">Public username and account UID</label>
+            <select id="moderationUid" aria-describedby="moderationMessage">
+              <option value="">Load usernames first</option>
+            </select>
+          </div>
+          <button type="button" class="btn red" id="resetUsernameBtn" disabled>Reset username to Participant</button>
+          <p id="moderationMessage" class="admin-message" role="status" aria-live="polite"></p>
+          <p>Names update publicly after the next successful leaderboard recalculation. Use Recalculate leaderboard above when ready.</p>
+        </div>
       </section>
 
 
