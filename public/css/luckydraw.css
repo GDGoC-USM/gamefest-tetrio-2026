@@ -557,6 +557,59 @@
   background: #d94c7018;
 }
 
+.ld-editor-id {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+
+  color: var(--admin-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.ld-removed-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 12px 0;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.ld-removed-info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ld-removed-info strong {
+  overflow-wrap: anywhere;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ld-removed-info span {
+  overflow-wrap: anywhere;
+  color: var(--admin-muted);
+  font-size: 10px;
+}
+
+.ld-restore-btn {
+  min-width: 90px;
+  min-height: 38px;
+  padding: 8px 12px;
+
+  color: var(--admin-green);
+  border-color: #65e0b455;
+}
+
+.ld-restore-btn:hover {
+  background: #65e0b418;
+}
+
 #ldResetEditsBtn {
   margin-top: 22px;
   color: #d5b0ff;

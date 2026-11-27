@@ -173,6 +173,64 @@ try {
   assert.equal((await get('ticketAwards/currentDraw')).entries
     .filter(entry => entry.uid === 'synthetic-zero').length, 1);
   checks.push({ label: 'unchanged participant save certifies the same base ticket' });
+
+  // Issue #55: individual removal persists across refresh/reload and can be
+  // restored from current leaderboard eligibility.
+  const leaderboardBefore = await get('leaderboard/synthetic-one');
+  const entriesBefore = (await get('ticketAwards/currentDraw')).entries.length;
+  await page.locator('[data-editor-uid="synthetic-one"] [data-remove-participant]').click();
+  await page.locator('#ldMessage').filter({ hasText: /has been removed/ }).waitFor();
+  let drawState = await get('ticketAwards/currentDraw');
+  assert.ok(drawState.removedUids.includes('synthetic-one'));
+  assert.equal(drawState.entries.some(entry => entry.uid === 'synthetic-one'), false);
+  assert.equal(Number(await page.locator('#ldTickets').textContent()), entriesBefore - 2);
+  assert.equal(await page.locator('[data-editor-uid="synthetic-one"]').count(), 0);
+  assert.equal(await page.locator('[data-removed-uid="synthetic-one"]').count(), 1);
+  assert.deepEqual(await get('leaderboard/synthetic-one'), leaderboardBefore);
+  await refresh();
+  drawState = await get('ticketAwards/currentDraw');
+  assert.ok(drawState.removedUids.includes('synthetic-one'));
+  assert.equal(drawState.entries.some(entry => entry.uid === 'synthetic-one'), false);
+  checks.push({ label: 'leaderboard participant removal persists across refresh' });
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#adminContent').waitFor({ state: 'visible' });
+  await page.locator('[data-section="luckydraw"]').click();
+  await page.locator('[data-removed-uid="synthetic-one"]').waitFor();
+  assert.equal(await page.locator('[data-editor-uid="synthetic-one"]').count(), 0);
+  await page.locator('[data-removed-uid="synthetic-one"] [data-restore-participant]').click();
+  await page.locator('#ldMessage').filter({ hasText: /has been restored/ }).waitFor();
+  await page.waitForFunction(() => !document.querySelector('#ldRefreshBtn').disabled);
+  drawState = await get('ticketAwards/currentDraw');
+  assert.ok(!drawState.removedUids.includes('synthetic-one'));
+  assert.equal(drawState.entries.filter(entry => entry.uid === 'synthetic-one').length, 2);
+  assert.deepEqual(await get('leaderboard/synthetic-one'), leaderboardBefore);
+  checks.push({ label: 'removed participant restores current leaderboard tickets after reload' });
+
+  // Duplicate display names remain separate manual identities.
+  await page.locator('[data-editor-uid="manual:person-0"] [data-remove-participant]').click();
+  await page.locator('#ldMessage').filter({ hasText: /has been removed/ }).waitFor();
+  drawState = await get('ticketAwards/currentDraw');
+  assert.ok(drawState.removedUids.includes('manual:person-0'));
+  assert.equal(drawState.entries.some(entry => entry.uid === 'manual:person-0'), false);
+  assert.equal(drawState.entries.filter(entry => entry.uid === 'manual:person-1').length, 2);
+  assert.equal(drawState.manualParticipants.filter(person => person.displayName === 'Same Name').length, 2);
+  assert.equal(await page.locator('[data-removed-uid="manual:person-0"]').count(), 1);
+  await refresh();
+  assert.equal((await get('ticketAwards/currentDraw')).entries.some(entry => entry.uid === 'manual:person-0'), false);
+  await page.locator('[data-removed-uid="manual:person-0"] [data-restore-participant]').click();
+  await page.locator('#ldMessage').filter({ hasText: /has been restored/ }).waitFor();
+  drawState = await get('ticketAwards/currentDraw');
+  assert.equal(drawState.entries.filter(entry => entry.uid === 'manual:person-0').length, 1);
+  assert.equal(drawState.entries.filter(entry => entry.uid === 'manual:person-1').length, 2);
+  checks.push({ label: 'duplicate manual names are removed and restored independently' });
+
+  // Keep one participant removed through the later bulk import.
+  await page.locator('[data-editor-uid="synthetic-five"] [data-remove-participant]').click();
+  await page.locator('#ldMessage').filter({ hasText: /has been removed/ }).waitFor();
+  assert.ok((await get('ticketAwards/currentDraw')).removedUids.includes('synthetic-five'));
+  await refresh();
+
   const normalGrid = await page.locator('#adminContent').evaluate(el => getComputedStyle(el).gridTemplateColumns);
   assert.match(normalGrid, /^230px /);
   const normalWidth = await page.locator('#ldWheel').evaluate(el => el.clientWidth);
@@ -194,6 +252,28 @@ try {
   await page.locator('#ldPresentationBtn').click();
   await page.setViewportSize({ width: 1440, height: 900 });
   assert.equal(await page.locator('#adminContent').evaluate(el => getComputedStyle(el).gridTemplateColumns), normalGrid);
+
+  // Removing and restoring another participant must not disturb the winner
+  // exclusion or its history record.
+  const winnerBefore = await get('ticketAwards/currentDraw');
+  const candidates = await page.locator('[data-editor-uid]').evaluateAll(
+    nodes => nodes.map(node => node.dataset.editorUid)
+  );
+  const target = candidates.find(uid => uid !== winnerBefore.lastWinner.uid);
+  assert.ok(target, 'another participant must remain available');
+  await page.locator(`[data-editor-uid="${target}"] [data-remove-participant]`).click();
+  await page.locator('#ldMessage').filter({ hasText: /has been removed/ }).waitFor();
+  let afterRemoval = await get('ticketAwards/currentDraw');
+  assert.ok(afterRemoval.excludedUids.includes(winnerBefore.lastWinner.uid));
+  assert.equal((await get(`ticketAwards/${winnerBefore.lastWinnerHistoryId}`)).uid, winnerBefore.lastWinner.uid);
+  assert.equal(afterRemoval.lastWinnerHistoryId, winnerBefore.lastWinnerHistoryId);
+  await page.locator(`[data-removed-uid="${target}"] [data-restore-participant]`).click();
+  await page.locator('#ldMessage').filter({ hasText: /has been restored/ }).waitFor();
+  afterRemoval = await get('ticketAwards/currentDraw');
+  assert.ok(afterRemoval.excludedUids.includes(winnerBefore.lastWinner.uid));
+  assert.ok(!afterRemoval.removedUids.includes(target));
+  checks.push({ label: 'winner exclusion and history survive unrelated removal/restore' });
+
   await spin();
   // Firestore's streaming listener is intentionally never network-idle.
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -213,7 +293,16 @@ try {
   await page.locator('#ldBulkImportBtn').click();
   await page.locator('#ldMessage').filter({ hasText: /^Imported 45 participants/ }).waitFor();
   await refresh();
-  assert.ok((await get('ticketAwards/currentDraw')).entries.length > 40);
+  let importedState = await get('ticketAwards/currentDraw');
+  assert.ok(importedState.entries.length > 40);
+  assert.ok(importedState.removedUids.includes('synthetic-five'));
+  assert.equal(importedState.entries.some(entry => entry.uid === 'synthetic-five'), false);
+  await page.locator('[data-removed-uid="synthetic-five"] [data-restore-participant]').click();
+  await page.locator('#ldMessage').filter({ hasText: /has been restored/ }).waitFor();
+  importedState = await get('ticketAwards/currentDraw');
+  assert.equal(importedState.entries.filter(entry => entry.uid === 'synthetic-five').length, 6);
+  assert.ok(!importedState.removedUids.includes('synthetic-five'));
+  checks.push({ label: 'bulk import preserves removals; restoration recalculates tickets' });
   await page.locator('#ldPresentationBtn').click();
   for (const [w,h] of [[3840,2160],[1920,1080],[1366,768],[844,390],[390,844],[320,568]]) {
     await layout(`dense-${w}x${h}`, w,h, true);
@@ -223,6 +312,31 @@ try {
   await spin();
   assert.equal(await page.locator('.ld-confetti').count(), 0);
   await layout('dense-winner', 1366,768,true);
+
+  // A stale wheel snapshot must reject a removal instead of clearing a
+  // concurrent administrator's exclusions.
+  await page.locator('#ldPresentationBtn').click();
+  await page.waitForTimeout(100);
+  const stale = await get('ticketAwards/currentDraw');
+  await put('ticketAwards/currentDraw', { ...stale, version: 'browser-stale' });
+  const staleCandidates = await page.locator('[data-editor-uid]').evaluateAll(
+    nodes => nodes.map(node => node.dataset.editorUid)
+  );
+  const staleTarget = staleCandidates[0];
+  assert.ok(staleTarget, 'an eligible participant is required');
+  const errorStart = errors.length;
+  await page.locator(`[data-editor-uid="${staleTarget}"] [data-remove-participant]`).click();
+  await page.locator('#ldMessage').filter({ hasText: /Unable to remove participant/ }).waitFor();
+  await page.waitForFunction(() => !document.querySelector('#ldRefreshBtn').disabled);
+  await page.waitForTimeout(100);
+  const staleAfter = await get('ticketAwards/currentDraw');
+  assert.equal(staleAfter.version, 'browser-stale');
+  assert.ok(!(staleAfter.removedUids || []).includes(staleTarget));
+  assert.equal(errors.length, errorStart + 1);
+  assert.match(errors[errorStart], /Remove participant error:.*draw changed/);
+  errors.splice(errorStart, 1);
+  checks.push({ label: 'stale editor removal is rejected and reloads the draw' });
+
   // Server revision changes must reject a saved pool without an award.
   const saved = await get('ticketAwards/currentDraw');
   await put('settings/leaderboardRevision', { version: 'browser-v2', ready: false, cleanupPending: false, updatedAt: new Date().toISOString() });

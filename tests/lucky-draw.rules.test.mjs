@@ -262,6 +262,58 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       assert.deepEqual((await get('ticketAwards/currentDraw')).data(), (await store.refresh()).draw);
       assert.deepEqual((await get('ticketAwards/currentDraw')).data().excludedUids, []);
     });
+    await t.test('removed leaderboard participants persist, reject stale spins and restore current tickets', async () => {
+      await persistRows([row('alice', 2), row('bob', 0, 2)]);
+      let { draw } = await store.refresh();
+      const baseline = draw.entries.length;
+      assert.equal(baseline, 4);
+
+      const removed = await store.save(draw.version, { removedUids: ['alice'] });
+      assert.deepEqual(removed.removedUids, ['alice']);
+
+      // A stale wheel snapshot cannot spin after the exclusion change.
+      await assert.rejects(store.spin(draw.version), /changed|outdated/);
+
+      draw = (await store.refresh()).draw;
+      assert.ok(draw.entries.every(entry => entry.uid !== 'alice'));
+      assert.equal(draw.entries.length, 1);
+
+      const writes = metrics.writes;
+      await store.refresh();
+      assert.equal(metrics.writes, writes, 'unchanged refresh must not rewrite exclusions');
+
+      // An old editor version cannot silently clear the persisted exclusion.
+      await assert.rejects(store.save(removed.version, { removedUids: [] }), /changed/);
+      assert.deepEqual((await store.refresh()).draw.removedUids, ['alice']);
+
+      // Correct counts change while the participant stays removed.
+      await persistRows([row('alice', 5), row('bob', 0, 2)]);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.some(entry => entry.uid === 'alice'), false);
+      assert.deepEqual(draw.removedUids, ['alice']);
+
+      // Spinning another participant must not copy removals into the winner
+      // exclusion list, or restoring would leave them permanently excluded.
+      const bobWin = await store.spin(draw.version);
+      assert.equal(bobWin.winner.uid, 'bob');
+      let spun = (await get('ticketAwards/currentDraw')).data();
+      assert.deepEqual(spun.removedUids, ['alice']);
+      assert.deepEqual(spun.excludedUids, ['bob']);
+      const bobUndone = await store.undo(bobWin.historyId);
+      assert.deepEqual(bobUndone.removedUids, ['alice']);
+      assert.deepEqual(bobUndone.excludedUids, []);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.some(entry => entry.uid === 'alice'), false);
+
+      draw = await store.save(draw.version, { removedUids: [] });
+      assert.deepEqual(draw.removedUids, []);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.filter(entry => entry.uid === 'alice').length, 6);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'bob').length, 1);
+
+      await persistRows([row('alice', 1), row('bob', 0, 2)]);
+      await store.refresh();
+    });
     await t.test('manual participants certify by ID and tickets; edits invalidate the certified pool', async () => {
       await persistRows([row('alice', 1)]);
       let { draw } = await store.refresh();
@@ -277,6 +329,32 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       assert.deepEqual(draw.entries.map(entry => entry.uid),
         ['alice', 'alice', 'manual:manual-a', 'manual:manual-a', 'manual:manual-b']);
       assert.equal(draw.entries.find(entry => entry.uid === 'manual:manual-a').displayName, 'Manual Alice');
+
+      // Duplicate names remain separate identities. Removing one manual ID
+      // excludes all of its tickets without touching its same-name peer.
+      draw = await store.save(draw.version, { removedUids: ['manual:manual-a'] });
+      await assert.rejects(store.spin(draw.version), /outdated/);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.some(entry => entry.uid === 'manual:manual-a'), false);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-b').length, 1);
+      assert.deepEqual(draw.removedUids, ['manual:manual-a']);
+
+      // A later bulk import save preserves the persisted exclusion.
+      const imported = [...manual, { id: 'manual-c', displayName: 'Manual Alice', tickets: 3 }];
+      draw = await store.save(draw.version, { manualParticipants: imported });
+      draw = (await store.refresh()).draw;
+      assert.deepEqual(draw.removedUids, ['manual:manual-a']);
+      assert.equal(draw.entries.some(entry => entry.uid === 'manual:manual-a'), false);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-b').length, 1);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-c').length, 3);
+
+      // Restoring recalculates the configured manual ticket count.
+      draw = await store.save(draw.version, { removedUids: [] });
+      assert.deepEqual(draw.removedUids, []);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-a').length, 2);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-b').length, 1);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-c').length, 3);
 
       const edited3 = manual.map(person => person.id === 'manual-a' ? { ...person, tickets: 3 } : person);
       draw = await store.save(draw.version, { manualParticipants: edited3 });
@@ -447,6 +525,17 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       const before = metrics.writes;
       await store.refresh();
       assert.equal(metrics.writes, before);
+    });
+    await t.test('non-admins cannot modify Lucky Draw exclusions', async () => {
+      const before = (await get('ticketAwards/currentDraw')).data();
+      const outsider = token('outsider');
+      await assert.rejects(
+        request('/ticketAwards/currentDraw',
+          { fields: fields({ ...before, removedUids: ['alice'] }) },
+          outsider, 'PATCH'),
+        error => error.status === 403
+      );
+      assert.deepEqual((await get('ticketAwards/currentDraw')).data(), before);
     });
   } finally {
     const response = await fetch(`${origin}/emulator/v1/${database}/documents`, { method: 'DELETE' });
