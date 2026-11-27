@@ -30,6 +30,7 @@ These instructions apply to the entire repository. Read this file before running
 - `public/js/predict.js`: owner profile initialization/editing and private prediction subscriptions/saves/resets.
 - `public/js/usernames.js`: Unicode public-name validation, safe fallbacks and Google-name initialization policy.
 - `public/js/leaderboard-sync.js`: persisted ranking and changed-row planning; `leaderboard.js`: public listener and shared-rank rendering.
+- `public/js/lucky-draw-import.js`: pure bulk-name parsing, whitespace/case duplicate normalization, name/row limits and unique manual participant ID allocation.
 - `public/js/luckydraw.js`: weighted wheel, saved pool, winner history and undo inside `public/admin/index.html`.
 - `public/js/home.js` and `matches.js`: public room/result views. HTML/CSS remain page-specific; see README's structure map.
 - There is no application server, Cloud Function or scheduled scorer. Browser SDK imports come from Google's CDN and require network access on first load.
