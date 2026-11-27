@@ -21,6 +21,14 @@ import {
   parseBulkParticipants
 } from "./lucky-draw-import.js";
 
+import {
+  labelRadiusFor,
+  segmentCenterAngle,
+  targetRotationForWinner
+} from "./lucky-wheel-geometry.js";
+
+import { launchConfetti } from "./lucky-confetti.js";
+
 // ==========================================
 // LUCKY DRAW CONFIGURATION
 // ==========================================
@@ -105,6 +113,12 @@ function setPresentationMode(enabled) {
     presentationBtn.textContent = enabled
       ? "EXIT PRESENTATION MODE"
       : "ENTER PRESENTATION MODE";
+  }
+
+  // The wheel resizes with the presentation class. Realign labels without
+  // rebuilding segments, which would move the frozen winning segment.
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(positionWheelLabels);
   }
 }
 
@@ -902,6 +916,10 @@ async function resetEdits() {
 // RENDER WHEEL WITH PARTICIPANT NAMES
 // ==========================================
 
+// Above this many tickets, radial labels cannot stay readable, so the wheel
+// falls back to a participant legend instead of overlapping text.
+const MAX_WHEEL_LABELS = 40;
+
 function renderWheel() {
   wheel.querySelectorAll(".ld-wheel-label").forEach(label => {
     label.remove();
@@ -910,6 +928,7 @@ function renderWheel() {
   if (!currentEntries.length) {
     wheel.style.background =
       "conic-gradient(#292346, #17142b, #292346)";
+    renderWheelLegend([]);
 
     return;
   }
@@ -939,34 +958,32 @@ function renderWheel() {
   wheel.style.background =
     `conic-gradient(${segments.join(",")})`;
 
-  // One label for every ticket.
-  currentEntries.forEach((entry, index) => {
-    const angle = (index + 0.5) * (360 / total);
+  if (total > MAX_WHEEL_LABELS) {
+    // Dense pool: keep every segment but move identity into a readable legend.
+    renderWheelLegend(currentEntries);
+  } else {
+    renderWheelLegend([]);
 
-    const label = document.createElement("span");
+    const fontSize =
+      total > 30 ? "6px" :
+      total > 20 ? "7px" :
+      total > 12 ? "8px" : "10px";
 
-    label.className = "ld-wheel-label";
-    label.textContent = entryDisplayName(entry);
-    label.title = label.textContent;
+    // One label for every ticket, so the label under the pointer matches the
+    // announced winner at rest.
+    currentEntries.forEach(entry => {
+      const label = document.createElement("span");
 
-    // Position each label proportionally to the wheel size.
-    const labelRadius = wheel.clientWidth * 0.34;
+      label.className = "ld-wheel-label";
+      label.textContent = entryDisplayName(entry);
+      label.title = label.textContent;
+      label.style.fontSize = fontSize;
 
-    label.style.transform =
-      `translate(-50%, -50%) rotate(${angle}deg) translateY(-${labelRadius}px) rotate(-90deg)`;
+      wheel.appendChild(label);
+    });
 
-    if (total > 30) {
-      label.style.fontSize = "6px";
-    } else if (total > 20) {
-      label.style.fontSize = "7px";
-    } else if (total > 12) {
-      label.style.fontSize = "8px";
-    } else {
-      label.style.fontSize = "10px";
-    }
-
-    wheel.appendChild(label);
-  });
+    positionWheelLabels();
+  }
 
   const center = wheel.querySelector(".luckydraw-wheel-center");
 
@@ -975,78 +992,58 @@ function renderWheel() {
   }
 }
 
-// ==========================================
-// WINNER CONFETTI EFFECT
-// ==========================================
+// Re-place existing labels for the current wheel size without rebuilding the
+// segments, so resizing or presentation mode cannot change the frozen winner.
+function positionWheelLabels() {
+  const labels = wheel.querySelectorAll(".ld-wheel-label");
 
-function launchConfetti() {
-  // Respect reduced-motion accessibility settings.
-  if (window.matchMedia(
-    "(prefers-reduced-motion: reduce)"
-  ).matches) {
+  if (!labels.length) return;
+
+  const total = labels.length;
+  const labelRadius = labelRadiusFor(wheel.clientWidth);
+
+  labels.forEach((label, index) => {
+    const angle = segmentCenterAngle(index, total);
+
+    label.style.transform =
+      `translate(-50%, -50%) rotate(${angle}deg) translateY(-${labelRadius}px) rotate(-90deg)`;
+  });
+}
+
+function renderWheelLegend(entries) {
+  const legend = $("ldWheelLegend");
+
+  if (!legend) return;
+
+  if (!entries.length) {
+    legend.hidden = true;
+    legend.textContent = "";
+
     return;
   }
 
-  const colors = [
-    "#8a4bd8",
-    "#d94c70",
-    "#a66be8",
-    "#ffcc70",
-    "#ffffff",
-    "#c6a1ff"
-  ];
+  const groups = new Map();
 
-  const confetti = document.createElement("div");
-  confetti.className = "ld-confetti";
+  entries.forEach(entry => {
+    if (!groups.has(entry.uid)) {
+      groups.set(entry.uid, {
+        displayName: entryDisplayName(entry),
+        tickets: 0
+      });
+    }
 
-  const particleCount = 45;
+    groups.get(entry.uid).tickets++;
+  });
 
-  for (let i = 0; i < particleCount; i++) {
-    const particle = document.createElement("span");
+  legend.innerHTML = [...groups.values()].map(person => `
+    <span class="ld-wheel-legend-item">
+      <span class="ld-wheel-legend-name">${escapeHTML(person.displayName)}</span>
+      <span class="ld-wheel-legend-count">${person.tickets}</span>
+    </span>
+  `).join("");
 
-    particle.className = "ld-confetti-piece";
-
-    particle.style.setProperty(
-      "--x",
-      `${Math.random() * 100}%`
-    );
-
-    particle.style.setProperty(
-      "--drift",
-      `${Math.random() * 300 - 150}px`
-    );
-
-    particle.style.setProperty(
-      "--rotation",
-      `${Math.random() * 1080}deg`
-    );
-
-    particle.style.setProperty(
-      "--duration",
-      `${2.2 + Math.random() * 1.2}s`
-    );
-
-    particle.style.setProperty(
-      "--delay",
-      `${Math.random() * 0.5}s`
-    );
-
-    particle.style.setProperty(
-      "--color",
-      colors[Math.floor(Math.random() * colors.length)]
-    );
-
-    confetti.appendChild(particle);
-  }
-
-  document.body.appendChild(confetti);
-
-  // Remove the effect after the animation.
-  setTimeout(() => {
-    confetti.remove();
-  }, 4000);
+  legend.hidden = false;
 }
-
 
 // ==========================================
 // SPIN WHEEL
@@ -1079,18 +1076,14 @@ async function spinWheel() {
       <strong>SPINNING...</strong>
     `;
 
-    // Calculate the exact position of the winning wheel segment.
-    const winningCenter =
-      (winningIndex + 0.5) * (360 / entries.length);
-
-    const normalizedRotation =
-      ((currentRotation % 360) + 360) % 360;
-
-    const offset =
-      ((360 - winningCenter - normalizedRotation) % 360 + 360) % 360;
-
-    // Rotate the wheel through six full rotations before stopping.
-    currentRotation += 360 * 6 + offset;
+    // Rotate the wheel so the winning segment's centre stops under the top
+    // pointer, continuing forward from the current rotation.
+    currentRotation = targetRotationForWinner(
+      currentRotation,
+      winningIndex,
+      entries.length,
+      6
+    );
 
     wheel.style.transform = `rotate(${currentRotation}deg)`;
 
@@ -1455,6 +1448,13 @@ if (resetEditsBtn) {
 
 refreshBtn.addEventListener("click", refreshTickets);
 spinBtn.addEventListener("click", spinWheel);
+
+// Keep radial labels centred in their segments when the viewport or
+// presentation mode changes the wheel size. Only labels move; the wheel
+// background and rotation (including a frozen result) stay untouched.
+if (wheel && typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => positionWheelLabels()).observe(wheel);
+}
 
 // ==========================================
 // ADMIN AUTHENTICATION

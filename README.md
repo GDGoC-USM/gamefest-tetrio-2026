@@ -52,8 +52,11 @@ There is no `package.json` or build step. Pure regression scenarios use Node's b
         ├── leaderboard.js      Public leaderboard display
         ├── leaderboard-sync.js Pure ranking and changed-row planning
         ├── admin.js            Room management, bracket generation, and scoring
+        ├── lucky-draw-sync.js  Transactional draw refresh, spin and undo
         ├── lucky-draw-import.js Pure bulk-name parsing, duplicate checks and manual ID planning
-        └── luckydraw.js        Ticket selection and winner history
+        ├── lucky-confetti.js   Reduced-motion-aware winner celebration
+        ├── lucky-wheel-geometry.js Pure segment, rotation and label geometry
+        └── luckydraw.js        Ticket selection, wheel rendering and winner history
 ```
 
 Page scripts share Firebase access through `shared.js`. The main Firestore collections are `rooms`, `settings`, `profiles`, `predictions`, `leaderboard`, `admins`, and `ticketAwards`. Rules accept new room-based predictions only; legacy records remain readable and are rescored where applicable.
@@ -358,9 +361,10 @@ Run commands from the repository root and choose files relevant to your change. 
 ```sh
 node --test tests/tournament.test.mjs tests/roster-import.test.mjs
 node --test tests/auth-ui.test.mjs tests/usernames.test.mjs tests/profile-initialization.test.mjs tests/leaderboard-sync.test.mjs
+node --test tests/lucky-wheel-geometry.test.mjs tests/lucky-draw-import.test.mjs
 ```
 
-These cover tournament/scoring/feeders/statuses, CSV import, names/profile initialization and leaderboard ranking/delta planning without Firebase access. They do not prove transaction races, browser auth restoration, wheel geometry or production usage.
+These cover tournament/scoring/feeders/statuses, CSV import, names/profile initialization, leaderboard ranking/delta planning, wheel pointer/winner geometry and bulk participant parsing without Firebase access. They do not prove transaction races, browser auth restoration, rendered wheel layout or production usage.
 
 With Java 21+ selected, run isolated rules checks:
 
