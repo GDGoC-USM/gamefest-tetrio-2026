@@ -342,6 +342,42 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       });
       await assert.rejects(store.refresh(), /collides/);
     });
+    await t.test('bulk manual import commits every participant in one write and rejects stale previews', async () => {
+      const { draw } = await store.refresh();
+      const participants = [
+        { id: 'manual-bulk-0', displayName: 'Alice', tickets: 1 },
+        { id: 'manual-bulk-1', displayName: 'ALICE', tickets: 1 },
+        { id: 'manual-bulk-2', displayName: 'Bob', tickets: 1 }
+      ];
+      const before = { ...metrics };
+
+      const imported = await store.save(draw.version, { manualParticipants: participants });
+      assert.equal(metrics.writes - before.writes, 1, 'all participants must commit in one write');
+      assert.equal(metrics.reads - before.reads, 1);
+      assert.deepEqual(imported.manualParticipants, participants);
+      assert.equal(imported.leaderboardVersion, null, 'import must invalidate the certified pool');
+      assert.deepEqual(
+        (await get('ticketAwards/currentDraw')).data().manualParticipants,
+        participants
+      );
+
+      await assert.rejects(
+        store.save(draw.version, {
+          manualParticipants: [...participants, { id: 'manual-bulk-3', displayName: 'Dana', tickets: 1 }]
+        }),
+        /changed/
+      );
+      assert.equal(
+        (await get('ticketAwards/currentDraw')).data().manualParticipants.length,
+        3
+      );
+
+      const refreshed = (await store.refresh()).draw;
+      assert.deepEqual(
+        refreshed.entries.filter(entry => entry.uid.startsWith('manual:')).map(entry => entry.uid),
+        ['manual:manual-bulk-0', 'manual:manual-bulk-1', 'manual:manual-bulk-2']
+      );
+    });
   } finally {
     const response = await fetch(`${origin}/emulator/v1/${database}/documents`, { method: 'DELETE' });
     assert.equal(response.status, 200);

@@ -559,6 +559,69 @@
 
           </div>
 
+          <!-- BULK MANUAL IMPORT -->
+
+          <div class="ld-bulk-import">
+
+            <h4>Bulk Import Participants</h4>
+
+            <p class="muted">
+              Paste one participant name per line. Empty lines are ignored and
+              each participant starts with one ticket. Up to 200 names per
+              import, 60 characters per name. Duplicate names are highlighted
+              but never merged or blocked.
+            </p>
+
+            <label for="ldBulkNames">
+              Participant names (one per line)
+
+              <textarea
+                id="ldBulkNames"
+                rows="9"
+                spellcheck="false"
+                placeholder="Alice&#10;Bobby&#10;Charlie"
+              ></textarea>
+            </label>
+
+            <div class="ld-bulk-actions">
+              <button
+                type="button"
+                class="btn secondary"
+                id="ldBulkPreviewBtn"
+              >
+                PREVIEW BULK IMPORT
+              </button>
+            </div>
+
+            <div
+              class="ld-bulk-preview"
+              id="ldBulkPreview"
+              hidden
+            >
+              <p
+                class="ld-bulk-summary"
+                id="ldBulkSummary"
+                role="status"
+                aria-live="polite"
+              ></p>
+
+              <div
+                class="ld-bulk-preview-list"
+                id="ldBulkPreviewList"
+              ></div>
+
+              <button
+                type="button"
+                class="btn primary"
+                id="ldBulkImportBtn"
+                disabled
+              >
+                IMPORT PARTICIPANTS
+              </button>
+            </div>
+
+          </div>
+
           <hr class="ld-editor-divider">
 
           <!-- EDIT EXISTING PARTICIPANTS -->
