@@ -1,3 +1,4 @@
+
 import {
   auth,
   db,
@@ -93,6 +94,101 @@ function message(text, type = "info") {
 
   messageElement.textContent = text;
   messageElement.className = `notice ${type}`;
+}
+
+// ==========================================
+// WINNER CONFETTI (VISUAL ONLY)
+// ==========================================
+
+function celebrateWinner() {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+  const card = document.querySelector(".luckydraw-main");
+  if (!card) return;
+
+  let style = document.getElementById("ldConfettiStyles");
+
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "ldConfettiStyles";
+    style.textContent = `
+      .ld-confetti-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        overflow: hidden;
+        pointer-events: none;
+      }
+
+      .ld-confetti-piece {
+        position: absolute;
+        top: -14px;
+        width: 8px;
+        height: 13px;
+        border-radius: 2px;
+        opacity: 0;
+        animation: ld-confetti-fall var(--fall-duration) ease-out var(--fall-delay) forwards;
+        will-change: transform, opacity;
+      }
+
+      @keyframes ld-confetti-fall {
+        0% {
+          opacity: 1;
+          transform: translate3d(0, 0, 0) rotate(0deg);
+        }
+        85% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+          transform: translate3d(var(--drift), 80vh, 0) rotate(720deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .ld-confetti-layer {
+          display: none;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  card.querySelector(".ld-confetti-layer")?.remove();
+
+  const layer = document.createElement("div");
+  layer.className = "ld-confetti-layer";
+  layer.setAttribute("aria-hidden", "true");
+
+  const colors = [
+    "#d5b0ff",
+    "#ff527b",
+    "#ffd166",
+    "#65d6c4",
+    "#ffffff"
+  ];
+
+  for (let index = 0; index < 56; index++) {
+    const piece = document.createElement("span");
+
+    piece.className = "ld-confetti-piece";
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.backgroundColor = colors[index % colors.length];
+    piece.style.setProperty(
+      "--drift",
+      `${Math.round(Math.random() * 180 - 90)}px`
+    );
+    piece.style.setProperty("--fall-delay", `${Math.random() * 0.35}s`);
+    piece.style.setProperty(
+      "--fall-duration",
+      `${1.5 + Math.random() * 0.8}s`
+    );
+
+    layer.appendChild(piece);
+  }
+
+  card.appendChild(layer);
+  window.setTimeout(() => layer.remove(), 2800);
 }
 
 // Manual entries are administrator-entered text, not profile names. Keep their
@@ -959,6 +1055,10 @@ async function spinWheel() {
       <span>WINNER!</span><strong>${escapeHTML(winnerName)}</strong>
       <small>Selected from ${winner.ticketsAtWin} ${winner.ticketsAtWin === 1 ? "entry" : "entries"}!</small>`;
     renderParticipants();
+
+    // Trigger confetti only after the winner is confirmed and displayed.
+    celebrateWinner();
+
     await loadHistory();
     message(`${winnerName} has won! Their entries are excluded and the winner is saved.`, "success");
   } catch (error) {
@@ -1098,7 +1198,7 @@ async function loadHistory() {
           data-undo-winner="${escapeHTML(person.id)}"
           style="min-width:auto;padding:7px 12px;font-size:11px;"
         >
-          ↩ UNDO
+          UNDO
         </button>
 
       </div>

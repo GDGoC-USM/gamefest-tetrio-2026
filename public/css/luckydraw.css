@@ -36,6 +36,7 @@
 ========================================== */
 
 .luckydraw-main {
+  position: relative;
   text-align: center;
   overflow: hidden;
 }
