@@ -117,6 +117,12 @@ if (presentationBtn) {
   });
 }
 
+document.addEventListener("admin-section-change", event => {
+  if (event.detail?.sectionId !== "luckydraw") {
+    setPresentationMode(false);
+  }
+});
+
 // ==========================================
 // MESSAGE
 // ==========================================
@@ -230,7 +236,7 @@ async function loadSavedDraw() {
       ? data.entries.map(entry => ({ ...entry, displayName: entryDisplayName(entry) }))
       : [];
     winnerElement.innerHTML = data.lastWinner
-      ? `<span>LAST WINNER</span><strong>${escapeHTML(publicUsername(data.lastWinner.displayName))}</strong>`
+      ? `<span>LAST WINNER</span><strong>${escapeHTML(entryDisplayName(data.lastWinner))}</strong>`
       : `<span>WAITING FOR THE DRAW</span><strong>GOOD LUCK!</strong>`;
     renderParticipants();
     await loadHistory();
@@ -1152,7 +1158,7 @@ async function undoSelectedWinner(historyId) {
     message("Winner record not found. Refresh and try again.", "error");
     return;
   }
-  const winnerName = publicUsername(selectedWinner.displayName);
+  const winnerName = entryDisplayName(selectedWinner);
   if (!confirm(`Undo ${winnerName}'s win? Historical entries will be restored. Refresh Latest Entries to validate current weights before spinning again.`)) return;
   isSpinning = true;
   spinBtn.disabled = true;
@@ -1164,7 +1170,7 @@ async function undoSelectedWinner(historyId) {
     drawVersion = draw.version;
     currentEntries = draw.entries;
     winnerElement.innerHTML = draw.lastWinner
-      ? `<span>LAST WINNER</span><strong>${escapeHTML(publicUsername(draw.lastWinner.displayName))}</strong>`
+      ? `<span>LAST WINNER</span><strong>${escapeHTML(entryDisplayName(draw.lastWinner))}</strong>`
       : `<span>WAITING FOR THE DRAW</span><strong>GOOD LUCK!</strong>`;
     renderParticipants();
     await loadHistory();
@@ -1206,7 +1212,7 @@ async function loadHistory() {
         return {
           id: item.id,
           ...data,
-          displayName: publicUsername(data.displayName)
+          displayName: entryDisplayName(data)
         };
       })
       .sort((a, b) => {
