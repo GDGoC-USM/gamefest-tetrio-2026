@@ -36,6 +36,7 @@
 ========================================== */
 
 .luckydraw-main {
+  position: relative;
   text-align: center;
   overflow: hidden;
 }
@@ -635,10 +636,6 @@
 
   .luckydraw-wheel {
     width: min(420px, 88vw);
-  }
-
-  .ld-wheel-label {
-    font-size: 8px;
   }
 
   .luckydraw-stats {
