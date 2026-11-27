@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createParticipantCleanupStore } from '../public/js/participant-cleanup.js';
 import { createLeaderboardRecalculator } from '../public/js/leaderboard-recalculate.js';
 import { createLeaderboardRevisionStore } from '../public/js/leaderboard-revision.js';
-import { createDrawStore } from '../public/js/lucky-draw-sync.js';
+import { TICKET_POLICY, createDrawStore } from '../public/js/lucky-draw-sync.js';
 
 const host = process.env.FIRESTORE_EMULATOR_HOST;
 if (host && !/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(host)) throw new Error('Loopback emulator required.');
@@ -167,6 +167,9 @@ test('participant cleanup authorization, revision fencing and durable recovery',
       await assert.rejects(draw.spin((await saved('ticketAwards/currentDraw')).version), /outdated/);
       await recalculate();
       assert.equal((await get('leaderboard/alice')).exists(), false, 'Recalculation cannot resurrect deleted sources');
+      const refreshed = (await draw.refresh()).draw;
+      assert.equal(refreshed.entries.some(entry => entry.uid === 'alice'), false);
+      assert.equal(refreshed.entries.filter(entry => entry.uid === 'bobby').length, 3);
     });
     await t.test('bulk selection distinguishes duplicate names and preserves unrelated participant', async () => {
       await reset();
@@ -205,7 +208,8 @@ test('participant cleanup authorization, revision fencing and durable recovery',
     });
     await t.test('a racing spin prevents cleanup from deleting its winner', async () => {
       await reset();
-      await seed('ticketAwards/currentDraw', { version: 'only-alice', leaderboardVersion: (await saved('settings/leaderboardRevision')).version,
+      await seed('ticketAwards/currentDraw', { version: 'only-alice', ticketPolicy: TICKET_POLICY,
+        leaderboardVersion: (await saved('settings/leaderboardRevision')).version,
         entries: [{ uid: 'alice', displayName: 'Same Name' }], excludedUids: [] });
       const prepared = await store.preview(['alice']);
       beforeCommit = async writes => {
@@ -237,7 +241,8 @@ test('participant cleanup authorization, revision fencing and durable recovery',
     });
     await t.test('undo after recalculation restores eligibility but requires current weights before spinning', async () => {
       await reset();
-      await seed('ticketAwards/currentDraw', { version: 'only-alice', leaderboardVersion: (await saved('settings/leaderboardRevision')).version,
+      await seed('ticketAwards/currentDraw', { version: 'only-alice', ticketPolicy: TICKET_POLICY,
+        leaderboardVersion: (await saved('settings/leaderboardRevision')).version,
         entries: [{ uid: 'alice', displayName: 'Same Name' }, { uid: 'alice', displayName: 'Same Name' }], excludedUids: [] });
       const selected = await draw.spin('only-alice');
       await firebase.runTransaction(firebase.db, async transaction => {
@@ -254,9 +259,9 @@ test('participant cleanup authorization, revision fencing and durable recovery',
       assert.deepEqual(undone.excludedUids, []);
       await assert.rejects(draw.spin(undone.version), /outdated/);
       const refreshed = (await draw.refresh()).draw;
-      assert.equal(refreshed.entries.filter(entry => entry.uid === 'alice').length, 1);
+      assert.equal(refreshed.entries.filter(entry => entry.uid === 'alice').length, 2);
       const winner = await draw.spin(refreshed.version);
-      assert.equal(winner.winner.ticketsAtWin, 1);
+      assert.equal(winner.winner.ticketsAtWin, 2);
     });
     await t.test('partial chunk failure survives a new store and retry deletes only remaining sources', async () => {
       await reset();

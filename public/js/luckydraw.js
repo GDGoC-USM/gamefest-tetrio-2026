@@ -13,7 +13,7 @@ import {
   escapeHTML
 } from "./shared.js";
 import { publicUsername } from "./usernames.js";
-import { createDrawStore } from "./lucky-draw-sync.js";
+import { createDrawStore, ticketCount } from "./lucky-draw-sync.js";
 import {
   createManualParticipantId,
   manualDisplayName,
@@ -335,10 +335,7 @@ function getEditorParticipants() {
     .map(person => {
       const uid = person.uid;
 
-      const originalTickets = Math.max(
-        0,
-        1 + Math.floor(Number(person.correct) || 0)
-      );
+      const originalTickets = ticketCount(person.correct);
 
       const tickets = Object.prototype.hasOwnProperty.call(
         ticketOverrides,

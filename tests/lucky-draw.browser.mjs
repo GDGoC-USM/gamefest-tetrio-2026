@@ -61,8 +61,10 @@ const account = await request(`${authBase}/accounts:signUp?key=fake-api-key`, { 
   body: JSON.stringify({ email, password, returnSecureToken: true }) });
 await put(`admins/${account.localId}`, { role: 'admin' });
 await put('settings/leaderboardRevision', { version: 'browser-v1', ready: true, cleanupPending: false, updatedAt: new Date().toISOString() });
-await put('leaderboard/synthetic-audience', { uid: 'synthetic-audience', displayName: 'Audience Synthetic',
-  correct: 3, points: 3, pending: 0, rank: 1, updatedAt: new Date().toISOString() });
+for (const [uid, correct] of [['synthetic-zero', 0], ['synthetic-one', 1], ['synthetic-five', 5]]) {
+  await put(`leaderboard/${uid}`, { uid, displayName: `Audience ${correct}`,
+    correct, points: correct, pending: 0, rank: 1, updatedAt: new Date().toISOString() });
+}
 const names = ['Same Name', 'Same Name', '李小龙', 'Émile', 'Long synthetic participant name with a distinguishing suffix One'];
 const people = names.map((displayName, index) => ({ id: `person-${index}`, displayName, tickets: index + 1 }));
 await put('ticketAwards/currentDraw', { version: 'browser-start', entries: [], excludedUids: [], manualParticipants: people });
@@ -147,6 +149,21 @@ try {
   await page.locator('#adminContent').waitFor({ state: 'visible' });
   await page.locator('[data-section="luckydraw"]').click();
   await refresh();
+  const certified = await get('ticketAwards/currentDraw');
+  for (const [uid, correct] of [['synthetic-zero', 0], ['synthetic-one', 1], ['synthetic-five', 5]]) {
+    const shown = Number(await page.locator(`[data-editor-uid="${uid}"] [data-edit-tickets]`).inputValue());
+    assert.equal(shown, correct + 1);
+    assert.equal(certified.entries.filter(entry => entry.uid === uid).length, shown);
+    assert.equal((await get(`leaderboard/${uid}`)).points, correct);
+  }
+  checks.push({ label: 'editor/authoritative base tickets agree for zero, one and five correct; points unchanged' });
+  // Saving an unchanged base-inclusive quantity must not block certification.
+  await page.locator('[data-editor-uid="synthetic-zero"] [data-save-participant]').click();
+  await page.locator('#ldMessage').filter({ hasText: /details have been saved/ }).waitFor();
+  await refresh();
+  assert.equal((await get('ticketAwards/currentDraw')).entries
+    .filter(entry => entry.uid === 'synthetic-zero').length, 1);
+  checks.push({ label: 'unchanged participant save certifies the same base ticket' });
   const normalGrid = await page.locator('#adminContent').evaluate(el => getComputedStyle(el).gridTemplateColumns);
   assert.match(normalGrid, /^230px /);
   const normalWidth = await page.locator('#ldWheel').evaluate(el => el.clientWidth);
@@ -174,6 +191,7 @@ try {
   await page.locator('#adminContent').waitFor({ state: 'visible' });
   await page.locator('[data-section="luckydraw"]').click();
   await page.locator('#ldHistory button').first().waitFor();
+  await page.waitForFunction(() => !document.querySelector('#ldRefreshBtn').disabled);
   await page.locator('#ldHistory button').first().click();
   await page.locator('#ldMessage').filter({ hasText: /was undone/ }).waitFor();
   const undone = await get('ticketAwards/currentDraw');
