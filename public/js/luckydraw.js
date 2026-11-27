@@ -1260,6 +1260,7 @@ if (bulkImportBtn) {
       if (bulkImportBtn) {
         bulkImportBtn.disabled = !bulkPreviewState?.canImport;
       }
+      spinBtn.disabled = !isAuthorized || currentEntries.length === 0;
     }
   });
 }

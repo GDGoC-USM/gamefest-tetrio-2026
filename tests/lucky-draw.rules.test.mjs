@@ -343,6 +343,8 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       await assert.rejects(store.refresh(), /collides/);
     });
     await t.test('bulk manual import commits every participant in one write and rejects stale previews', async () => {
+      const current = (await get('ticketAwards/currentDraw')).data();
+      await store.save(current.version, { manualParticipants: [], ticketOverrides: {} });
       const { draw } = await store.refresh();
       const participants = [
         { id: 'manual-bulk-0', displayName: 'Alice', tickets: 1 },
