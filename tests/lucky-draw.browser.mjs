@@ -84,14 +84,17 @@ page.on('console', message => { if (message.type() === 'error') errors.push(mess
 page.on('dialog', dialog => dialog.accept());
 async function refresh() {
   await page.locator('#ldRefreshBtn').click();
-  await page.locator('#ldMessage').filter({ hasText: /^Validated/ }).waitFor();
+  await page.locator('#ldMessage').filter({ hasText: /eligible tickets? ready for the draw/ }).waitFor();
   await page.waitForFunction(() => !document.querySelector('#ldRefreshBtn').disabled);
+  const text = (await page.locator('#ldMessage').textContent()).trim();
+  assert.match(text, /^\d+ eligible (ticket|tickets) ready for the draw\.$/);
+  assert.doesNotMatch(text, /prediction awards|manual tickets|duplicate|Previous winners/i);
 }
 async function layout(label, width, height, screenshot = false) {
   await page.setViewportSize({ width, height });
   await page.waitForTimeout(100);
   const bounds = await page.evaluate(() => {
-    const selectors = ['.luckydraw-main', '#ldWheel', '.luckydraw-pointer', '#ldWinner', '#ldSpinBtn', '#ldRefreshBtn', '#ldPresentationBtn', '#ldWheelLegend'];
+    const selectors = ['.luckydraw-main', '#ldWheel', '.luckydraw-pointer', '#ldWinner', '#ldSpinBtn', '#ldRefreshBtn', '#ldPresentationBtn', '#ldWheelLegend', '#ldMessage'];
     const boxes = Object.fromEntries(selectors.filter(s => !document.querySelector(s).hidden).map(s => {
       const element = document.querySelector(s);
       const r = element.getBoundingClientRect();
@@ -107,6 +110,8 @@ async function layout(label, width, height, screenshot = false) {
       zoom: visualViewport.scale,
       legendWidth: document.querySelector('#ldWheelLegend').clientWidth,
       legendScroll: document.querySelector('#ldWheelLegend').scrollWidth,
+      messageClient: { width: document.querySelector('#ldMessage').clientWidth, height: document.querySelector('#ldMessage').clientHeight },
+      messageScroll: { width: document.querySelector('#ldMessage').scrollWidth, height: document.querySelector('#ldMessage').scrollHeight },
       font: parseFloat(getComputedStyle(document.querySelector('.ld-wheel-label') || document.querySelector('#ldWheel')).fontSize) };
   });
   assert.equal(bounds.zoom, 1);
@@ -117,6 +122,10 @@ async function layout(label, width, height, screenshot = false) {
   }
   assert.ok(bounds.boxes['#ldWheel'].width >= 70, `${label}: wheel collapsed`);
   assert.ok(bounds.legendScroll <= bounds.legendWidth + 1, `${label}: legend horizontal overflow`);
+  assert.ok(bounds.messageScroll.width <= bounds.messageClient.width + 1,
+    `${label}: status message clipped horizontally`);
+  assert.ok(bounds.messageScroll.height <= bounds.messageClient.height + 1,
+    `${label}: status message clipped vertically`);
   if (screenshot) await page.screenshot({ path: `${scratch}/${label}.png` });
   checks.push({ label, wheel: Math.round(bounds.boxes['#ldWheel'].width), font: bounds.font });
   return bounds;
@@ -169,8 +178,8 @@ try {
   const normalWidth = await page.locator('#ldWheel').evaluate(el => el.clientWidth);
   const normalFont = await page.locator('.ld-wheel-label').first().evaluate(el => parseFloat(getComputedStyle(el).fontSize));
   await page.locator('#ldPresentationBtn').click();
-  for (const [w, h] of [[1920,1080],[1440,900],[1366,768],[1024,600],[844,390],[390,844],[320,568]]) {
-    await layout(`sparse-${w}x${h}`, w, h, w === 1920 || w === 390 || w === 844);
+  for (const [w, h] of [[3840,2160],[1920,1080],[1440,900],[1366,768],[1024,600],[844,390],[390,844],[320,568]]) {
+    await layout(`sparse-${w}x${h}`, w, h, w === 3840 || w === 1920 || w === 390 || w === 844);
   }
   await layout('large-labels', 1920, 1080);
   const largeWidth = await page.locator('#ldWheel').evaluate(el => el.clientWidth);
@@ -206,7 +215,7 @@ try {
   await refresh();
   assert.ok((await get('ticketAwards/currentDraw')).entries.length > 40);
   await page.locator('#ldPresentationBtn').click();
-  for (const [w,h] of [[1920,1080],[1366,768],[844,390],[390,844],[320,568]]) {
+  for (const [w,h] of [[3840,2160],[1920,1080],[1366,768],[844,390],[390,844],[320,568]]) {
     await layout(`dense-${w}x${h}`, w,h, true);
   }
   assert.equal(await page.locator('.ld-wheel-label').count(), 0);

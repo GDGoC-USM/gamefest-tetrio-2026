@@ -975,10 +975,11 @@ body.ld-presentation-mode .luckydraw-actions button {
 }
 
 body.ld-presentation-mode #ldMessage {
-  max-height: 3.4em;
+  max-height: none;
   margin: 0;
-  overflow: auto;
+  overflow: visible;
   overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 
 /* Short/wide screens put the operator controls beside the wheel. */

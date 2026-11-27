@@ -286,7 +286,12 @@ async function refreshTickets() {
     currentEntries = draw.entries;
     renderParticipants();
     await loadHistory();
-    message(`Validated ${currentEntries.length} entries from prediction awards and manual tickets. Previous winners remain excluded.`, "success");
+    message(
+      `${currentEntries.length} eligible ${
+        currentEntries.length === 1 ? "ticket" : "tickets"
+      } ready for the draw.`,
+      "success"
+    );
     return true;
   } catch (error) {
     currentEntries = [];
