@@ -2,7 +2,7 @@
 
 A tournament management and audience prediction website for GameFest. Visitors follow rooms and results, sign in with Google, predict group qualifiers and head-to-head winners, and earn leaderboard points. Administrators manage the bracket, publish results, and run a weighted Lucky Draw.
 
-Public site: https://gamefest-tetrio-showdown.web.app/ · Repository: https://github.com/GDGoC-USM/gamefest-tetrio-2026
+Public site: https://gamefest-tetrio-2026.web.app/ · Repository: https://github.com/GDGoC-USM/gamefest-tetrio-2026
 
 Current features include live room views, stage/room prediction controls, competitor CSV roster import, result publication/correction/reopening, UID-based scoring, editable public names, and an administrator-operated weighted wheel with history/undo. “Lucky Wheel” in issues refers to the existing **Lucky Draw** dashboard module, not a separate public page.
 
