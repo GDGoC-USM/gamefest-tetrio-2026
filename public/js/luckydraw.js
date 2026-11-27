@@ -1,3 +1,4 @@
+
 import {
   auth,
   db,
@@ -1147,6 +1148,7 @@ async function spinWheel() {
   }
 }
 
+
 // ==========================================
 // UNDO ANY SELECTED WINNER
 // ==========================================
@@ -1272,7 +1274,7 @@ async function loadHistory() {
           data-undo-winner="${escapeHTML(person.id)}"
           style="min-width:auto;padding:7px 12px;font-size:11px;"
         >
-          ↩ UNDO
+          UNDO
         </button>
 
       </div>
