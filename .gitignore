@@ -13,3 +13,6 @@ node_modules/
 
 # Local tournament fixtures and verification artifacts (never participant data in Git)
 .local/
+
+# document
+docs/superpowers/

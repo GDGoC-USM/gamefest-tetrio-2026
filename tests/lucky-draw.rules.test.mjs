@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createDrawStore } from '../public/js/lucky-draw-sync.js';
+import { TICKET_POLICY, createDrawStore } from '../public/js/lucky-draw-sync.js';
 import { createLeaderboardRevisionStore } from '../public/js/leaderboard-revision.js';
 import { calculateLeaderboard } from '../public/js/tournament.js';
 import { rankLeaderboardRows } from '../public/js/leaderboard-sync.js';
@@ -133,9 +133,13 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
   const revisions = createLeaderboardRevisionStore(firebase);
   const seed = (path, value) => request(`/${path}`, { fields: fields(value) }, 'owner', 'PATCH');
   const persistRows = async rows => {
+    const existing = await firebase.getDocs('leaderboard');
     const version = await revisions.begin();
     await firebase.runTransaction(firebase.db, async tx => {
       await revisions.assert(tx, version);
+      for (const item of existing.docs) {
+        if (!rows.some(row => row.uid === item.id)) tx.delete(`leaderboard/${item.id}`);
+      }
       for (const row of rows) tx.set(`leaderboard/${row.uid}`, { ...row, updatedAt: stamp });
     });
     await revisions.finish(version);
@@ -158,10 +162,10 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       await assert.rejects(store.spin(null), /synchronization/);
       assert.equal((await get('ticketAwards/currentDraw')).exists(), false);
     });
-    await t.test('refresh certifies exact positive counts and repeated refresh adds no writes', async () => {
+    await t.test('refresh certifies base plus correct counts and repeated refresh adds no writes', async () => {
       await persistRows([row('alice', 2), row('bob', 0, 2)]);
       const { draw } = await store.refresh();
-      assert.deepEqual(draw.entries.map(entry => entry.uid), ['alice', 'alice']);
+      assert.deepEqual(draw.entries.map(entry => entry.uid), ['alice', 'alice', 'alice', 'bob']);
       const before = metrics.writes;
       await store.refresh();
       assert.equal(metrics.writes, before);
@@ -171,22 +175,24 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       const results = await Promise.allSettled([store.spin(draw.version), store.spin(draw.version)]);
       assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
       const winner = results.find(result => result.status === 'fulfilled').value;
-      assert.equal(winner.winner.uid, 'alice');
-      assert.equal(winner.winner.ticketsAtWin, 2);
-      assert.deepEqual((await get('ticketAwards/currentDraw')).data().excludedUids, ['alice']);
-      assert.equal((await get(`ticketAwards/${winner.historyId}`)).data().uid, 'alice');
-      assert.equal((await store.refresh()).draw.entries.length, 0);
+      assert.ok(['alice', 'bob'].includes(winner.winner.uid));
+      assert.equal(winner.winner.ticketsAtWin, winner.winner.uid === 'alice' ? 3 : 1);
+      assert.deepEqual((await get('ticketAwards/currentDraw')).data().excludedUids, [winner.winner.uid]);
+      assert.equal((await get(`ticketAwards/${winner.historyId}`)).data().uid, winner.winner.uid);
+      const refreshed = (await store.refresh()).draw;
+      assert.equal(refreshed.entries.length, 4 - winner.winner.ticketsAtWin);
+      assert.ok(refreshed.entries.every(entry => entry.uid !== winner.winner.uid));
     });
     await t.test('concurrent undo restores historical tickets once; refresh replaces them with current counts', async () => {
       const current = (await get('ticketAwards/currentDraw')).data();
       const results = await Promise.allSettled([store.undo(current.lastWinnerHistoryId), store.undo(current.lastWinnerHistoryId)]);
       assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
       const undone = (await get('ticketAwards/currentDraw')).data();
-      assert.equal(undone.entries.length, 2);
+      assert.equal(undone.entries.length, 4);
       assert.deepEqual(undone.excludedUids, []);
       await assert.rejects(store.spin(undone.version), /outdated/);
       await persistRows([row('alice', 1), row('bob', 0, 2)]);
-      assert.equal((await store.refresh()).draw.entries.length, 1);
+      assert.equal((await store.refresh()).draw.entries.length, 3);
     });
     await t.test('corrected and unpublished results invalidate the pool before recalculation', async () => {
       const predictions = [{ uid: 'alice', roomId: 'A', selectedPlayers: ['A1', 'A2'], formatVersion: 2 }];
@@ -207,7 +213,7 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
         await revisions.finish(version);
         await assert.rejects(store.spin(draw.version), /outdated/);
         const refreshed = (await store.refresh()).draw;
-        assert.equal(refreshed.entries.length, room.resultsPublished ? 1 : 0);
+        assert.equal(refreshed.entries.length, room.resultsPublished ? 3 : 2);
       }
     });
     await t.test('cleanup revision bump defeats an in-flight spin and partial/overlapping recalculation', async () => {
@@ -269,7 +275,7 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       await assert.rejects(store.spin(draw.version), /outdated/);
       draw = (await store.refresh()).draw;
       assert.deepEqual(draw.entries.map(entry => entry.uid),
-        ['alice', 'manual:manual-a', 'manual:manual-a', 'manual:manual-b']);
+        ['alice', 'alice', 'manual:manual-a', 'manual:manual-a', 'manual:manual-b']);
       assert.equal(draw.entries.find(entry => entry.uid === 'manual:manual-a').displayName, 'Manual Alice');
 
       const edited3 = manual.map(person => person.id === 'manual-a' ? { ...person, tickets: 3 } : person);
@@ -294,7 +300,7 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
 
       const result = await store.spin(draw.version);
       assert.ok(result.winner.uid === 'alice' || result.winner.uid === 'manual:manual-a');
-      assert.equal(result.winner.ticketsAtWin, result.winner.uid === 'alice' ? 1 : 4);
+      assert.equal(result.winner.ticketsAtWin, result.winner.uid === 'alice' ? 2 : 4);
       assert.deepEqual((await get('ticketAwards/currentDraw')).data().excludedUids, [result.winner.uid]);
       assert.equal((await get(`ticketAwards/${result.historyId}`)).data().uid, result.winner.uid);
       assert.equal((await store.refresh()).draw.entries.some(entry => entry.uid === result.winner.uid), false);
@@ -343,6 +349,7 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       await assert.rejects(store.refresh(), /collides/);
     });
     await t.test('bulk manual import commits every participant in one write and rejects stale previews', async () => {
+      await persistRows([row('alice', 1)]);
       const current = (await get('ticketAwards/currentDraw')).data();
       await store.save(current.version, { manualParticipants: [], ticketOverrides: {} });
       const { draw } = await store.refresh();
@@ -379,6 +386,67 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
         refreshed.entries.filter(entry => entry.uid.startsWith('manual:')).map(entry => entry.uid),
         ['manual:manual-bulk-0', 'manual:manual-bulk-1', 'manual:manual-bulk-2']
       );
+    });
+    await t.test('zero, one and five correct predictions yield one, two and six tickets without changing points', async () => {
+      const current = (await get('ticketAwards/currentDraw')).data();
+      await store.save(current.version, { manualParticipants: [], ticketOverrides: {}, excludedUids: [] });
+      const rows = [row('zero', 0, 3), row('one', 1, 2), row('five', 5, 1)];
+      await persistRows(rows);
+      const before = await Promise.all(rows.map(value => get(`leaderboard/${value.uid}`)));
+      for (let iteration = 0; iteration < 3; iteration++) {
+        if (iteration) await persistRows(rows);
+        const { draw } = await store.refresh();
+        for (const value of rows) {
+          assert.equal(draw.entries.filter(entry => entry.uid === value.uid).length, value.correct + 1);
+          assert.equal((await get(`leaderboard/${value.uid}`)).data().points, value.correct);
+        }
+        const writes = metrics.writes;
+        await store.refresh();
+        assert.equal(metrics.writes, writes);
+      }
+      assert.deepEqual(before.map(item => item.data().points), [0, 1, 5]);
+    });
+    for (const correct of [0, 1, 5]) {
+      await t.test(`an override equal to ${correct + 1} authoritative tickets is accepted (${correct} correct)`, async () => {
+        await persistRows([row('alice', correct)]);
+        const current = (await get('ticketAwards/currentDraw')).data();
+        await store.save(current.version, { ticketOverrides: { alice: correct + 1 } });
+        const { draw } = await store.refresh();
+        assert.equal(draw.entries.filter(entry => entry.uid === 'alice').length, correct + 1);
+      });
+      await t.test(`an old-count override of ${correct} is rejected (${correct} correct)`, async () => {
+        const current = (await get('ticketAwards/currentDraw')).data();
+        await store.save(current.version, { ticketOverrides: { alice: correct } });
+        await assert.rejects(store.refresh(), /Custom ticket/);
+      });
+    }
+    await t.test('a certified pool from the old ticket policy cannot spin before refresh', async () => {
+      await persistRows([row('alice', 5), row('bob', 0, 2)]);
+      await store.save((await get('ticketAwards/currentDraw')).data().version, { ticketOverrides: {} });
+      let { draw } = await store.refresh();
+      // A pool persisted before the base-ticket formula has no policy stamp and
+      // still lists five Alice tickets, omitting zero-correct Bob.
+      const old = { ...draw };
+      delete old.ticketPolicy;
+      await request('/ticketAwards/currentDraw', undefined, admin, 'DELETE');
+      await seed('ticketAwards/currentDraw', { ...old, version: 'old-policy', ticketOverrides: {},
+        entries: Array.from({ length: 5 }, () => ({ uid: 'alice', displayName: 'Alice' })) });
+      await assert.rejects(store.spin('old-policy'), /outdated|refresh/i);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.ticketPolicy, TICKET_POLICY);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'bob').length, 1);
+    });
+    await t.test('refresh stamps the current policy even when certified entries are unchanged', async () => {
+      await persistRows([]);
+      const revision = (await get('settings/leaderboardRevision')).data().version;
+      await request('/ticketAwards/currentDraw', undefined, admin, 'DELETE');
+      await seed('ticketAwards/currentDraw', { version: 'untamped', leaderboardVersion: revision, entries: [], excludedUids: [] });
+      const { draw } = await store.refresh();
+      assert.equal(draw.ticketPolicy, TICKET_POLICY);
+      assert.notEqual(draw.version, 'untamped');
+      const before = metrics.writes;
+      await store.refresh();
+      assert.equal(metrics.writes, before);
     });
   } finally {
     const response = await fetch(`${origin}/emulator/v1/${database}/documents`, { method: 'DELETE' });

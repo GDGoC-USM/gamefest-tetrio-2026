@@ -4,6 +4,12 @@ const newVersion = () => crypto.randomUUID();
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const list = value => Array.isArray(value) ? value : [];
 
+// Website participants receive one base ticket plus one per correct pick.
+// Pools certified under an older formula carry a different (or absent) policy
+// stamp and must be refreshed before they can spin.
+export const TICKET_POLICY = 2;
+export const ticketCount = correct => 1 + Math.max(0, Math.floor(Number(correct) || 0));
+
 // All writers share currentDraw: a stale editor, refresh, spin or undo cannot
 // overwrite another administrator's exclusions or winner history.
 export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTransaction, serverTimestamp }) {
@@ -33,20 +39,22 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
     const entries = [];
     const leaderboardUids = new Set();
 
-    // Leaderboard prizes come from correct predictions. Custom quantities that
-    // differ from the authoritative count remain uncertifiable.
+    // Leaderboard prizes are one base ticket plus one per correct prediction.
+    // Custom quantities that differ from the authoritative count remain
+    // uncertifiable.
     for (const row of rows) {
       const correct = row.correct;
       if (!Number.isSafeInteger(correct) || correct < 0) {
         throw new Error('Invalid leaderboard ticket count. Recalculate the leaderboard before spinning.');
       }
       leaderboardUids.add(row.uid);
-      if (Object.hasOwn(draw.ticketOverrides || {}, row.uid) && draw.ticketOverrides[row.uid] !== correct) {
+      const expectedTickets = ticketCount(correct);
+      if (Object.hasOwn(draw.ticketOverrides || {}, row.uid) && draw.ticketOverrides[row.uid] !== expectedTickets) {
         throw new Error('Custom ticket quantities differ from prediction awards. Use Reset Edits before spinning.');
       }
       if (excluded.has(row.uid)) continue;
       const displayName = publicUsername(draw.nameOverrides?.[row.uid] ?? row.displayName);
-      for (let count = 0; count < correct; count++) entries.push({ uid: row.uid, displayName });
+      for (let count = 0; count < expectedTickets; count++) entries.push({ uid: row.uid, displayName });
     }
 
     // Manual participants are an explicit administrator-configured source, not
@@ -105,9 +113,10 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
       }
       const current = saved.exists() ? saved.data() : {};
       const entries = entriesFor(rows, current);
-      if (current.version && current.leaderboardVersion === expected && same(current.entries, entries)) return current;
+      if (current.ticketPolicy === TICKET_POLICY && current.version
+          && current.leaderboardVersion === expected && same(current.entries, entries)) return current;
       const updated = { ...current, entries, excludedUids: list(current.excludedUids),
-        leaderboardVersion: expected, version: newVersion(), updatedAt: serverTimestamp() };
+        ticketPolicy: TICKET_POLICY, leaderboardVersion: expected, version: newVersion(), updatedAt: serverTimestamp() };
       transaction.set(drawRef, updated);
       return updated;
     });
@@ -136,7 +145,7 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
       ]);
       const current = saved.exists() ? saved.data() : {};
       checkVersion(current, expected);
-      if (revision(revisionSnapshot) !== current.leaderboardVersion) {
+      if (revision(revisionSnapshot) !== current.leaderboardVersion || current.ticketPolicy !== TICKET_POLICY) {
         throw new Error('Tickets are outdated. Refresh Latest Entries before spinning.');
       }
       const entries = list(current.entries);
