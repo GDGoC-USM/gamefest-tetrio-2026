@@ -196,7 +196,7 @@ async function refreshTickets() {
   isSpinning = true;
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
-  message("Validating latest prediction awards...");
+  message("Validating prediction awards and manual tickets...");
   try {
     const { draw, rows } = await drawStore.refresh();
     loadDrawSettings(draw);
@@ -205,7 +205,7 @@ async function refreshTickets() {
     currentEntries = draw.entries;
     renderParticipants();
     await loadHistory();
-    message(`Validated ${currentEntries.length} prediction entries. Previous winners remain excluded.`, "success");
+    message(`Validated ${currentEntries.length} entries from prediction awards and manual tickets. Previous winners remain excluded.`, "success");
     return true;
   } catch (error) {
     currentEntries = [];

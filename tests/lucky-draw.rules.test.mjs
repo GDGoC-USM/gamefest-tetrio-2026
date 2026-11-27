@@ -22,7 +22,7 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
     if (Array.isArray(value)) return { arrayValue: { values: value.map(encode) } };
     if (typeof value === 'string') return { stringValue: value };
     if (typeof value === 'boolean') return { booleanValue: value };
-    if (typeof value === 'number') return { integerValue: String(value) };
+    if (typeof value === 'number') return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
     return { mapValue: { fields: fields(value) } };
   };
   const decode = value => {
@@ -30,6 +30,7 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
     if ('stringValue' in value) return value.stringValue;
     if ('timestampValue' in value) return value.timestampValue;
     if ('integerValue' in value) return Number(value.integerValue);
+    if ('doubleValue' in value) return value.doubleValue;
     if ('booleanValue' in value) return value.booleanValue;
     if ('arrayValue' in value) return (value.arrayValue.values || []).map(decode);
     return object(value.mapValue.fields || {});
@@ -229,11 +230,8 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       await store.save(draw.version, { ticketOverrides: { alice: 100 } });
       await assert.rejects(store.save(draw.version, { removedUids: [] }), /changed/);
       await assert.rejects(store.refresh(), /Custom ticket/);
-      let current = (await get('ticketAwards/currentDraw')).data();
-      await store.save(current.version, { ticketOverrides: {}, manualParticipants: [{ id: 'x', tickets: 1 }] });
-      await assert.rejects(store.refresh(), /Manual tickets/);
-      current = (await get('ticketAwards/currentDraw')).data();
-      await store.save(current.version, { manualParticipants: [] });
+      const current = (await get('ticketAwards/currentDraw')).data();
+      await store.save(current.version, { ticketOverrides: {} });
       const refreshed = (await store.refresh()).draw;
       const before = { ...metrics };
       const selected = await store.spin(refreshed.version);
@@ -257,6 +255,92 @@ test('authoritative draw transactions and revision fencing', { skip: !host && 'F
       failCommit = false;
       assert.deepEqual((await get('ticketAwards/currentDraw')).data(), (await store.refresh()).draw);
       assert.deepEqual((await get('ticketAwards/currentDraw')).data().excludedUids, []);
+    });
+    await t.test('manual participants certify by ID and tickets; edits invalidate the certified pool', async () => {
+      await persistRows([row('alice', 1)]);
+      let { draw } = await store.refresh();
+      const manual = [
+        { id: 'manual-a', displayName: 'Manual Alice', tickets: 2 },
+        { id: 'manual-b', displayName: 'Manual Alice', tickets: 1 },
+        { id: 'manual-zero', displayName: 'Zero Tickets', tickets: 0 }
+      ];
+
+      draw = await store.save(draw.version, { manualParticipants: manual, ticketOverrides: {} });
+      await assert.rejects(store.spin(draw.version), /outdated/);
+      draw = (await store.refresh()).draw;
+      assert.deepEqual(draw.entries.map(entry => entry.uid),
+        ['alice', 'manual:manual-a', 'manual:manual-a', 'manual:manual-b']);
+      assert.equal(draw.entries.find(entry => entry.uid === 'manual:manual-a').displayName, 'Manual Alice');
+
+      const edited3 = manual.map(person => person.id === 'manual-a' ? { ...person, tickets: 3 } : person);
+      draw = await store.save(draw.version, { manualParticipants: edited3 });
+      await assert.rejects(store.spin(draw.version), /outdated/);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-a').length, 3);
+
+      const edited4 = edited3.map(person => person.id === 'manual-a' ? { ...person, tickets: 4 } : person);
+      beforeCommit = () => store.save(draw.version, { manualParticipants: edited4 });
+      await assert.rejects(store.spin(draw.version), /changed/);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-a').length, 4);
+
+      draw = await store.save(draw.version, {
+        manualParticipants: edited4.filter(person => person.id !== 'manual-b')
+      });
+      await assert.rejects(store.spin(draw.version), /outdated/);
+      draw = (await store.refresh()).draw;
+      assert.equal(draw.entries.some(entry => entry.uid === 'manual:manual-b'), false);
+      assert.equal(draw.entries.filter(entry => entry.uid === 'manual:manual-a').length, 4);
+
+      const result = await store.spin(draw.version);
+      assert.ok(result.winner.uid === 'alice' || result.winner.uid === 'manual:manual-a');
+      assert.equal(result.winner.ticketsAtWin, result.winner.uid === 'alice' ? 1 : 4);
+      assert.deepEqual((await get('ticketAwards/currentDraw')).data().excludedUids, [result.winner.uid]);
+      assert.equal((await get(`ticketAwards/${result.historyId}`)).data().uid, result.winner.uid);
+      assert.equal((await store.refresh()).draw.entries.some(entry => entry.uid === result.winner.uid), false);
+
+      const undone = await store.undo(result.historyId);
+      assert.equal(undone.entries.filter(entry => entry.uid === result.winner.uid).length, result.winner.ticketsAtWin);
+      assert.deepEqual(undone.excludedUids, []);
+      await assert.rejects(store.spin(undone.version), /outdated/);
+
+      const pending = await firebase.runTransaction(firebase.db, tx => revisions.invalidate(tx, { cleanupPending: true }));
+      await assert.rejects(store.refresh(), /synchronization/);
+      await assert.rejects(store.spin(undone.version), /synchronization/);
+      await revisions.settleCleanup(pending);
+      await persistRows([row('alice', 1)]);
+    });
+    await t.test('manual participant eligibility rejects malformed or ambiguous records', async () => {
+      let current = (await get('ticketAwards/currentDraw')).data();
+      const cases = [
+        { value: [{ id: 'dup', displayName: 'First', tickets: 1 }, { id: 'dup', displayName: 'Second', tickets: 1 }], error: /Duplicate manual/ },
+        { value: [{ id: 'bad', displayName: 'Bad', tickets: 1.5 }], error: /ticket count/ },
+        { value: [{ id: 'bad', displayName: 'Bad', tickets: -1 }], error: /ticket count/ },
+        { value: [{ id: 'bad', displayName: 'Bad', tickets: 10001 }], error: /ticket count/ },
+        { value: [{ id: 'bad', displayName: '   ', tickets: 1 }], error: /name/ },
+        { value: [{ id: 'bad', displayName: 'Bad', tickets: '2' }], error: /ticket count/ },
+        { value: [null], error: /record/ },
+        { value: {}, error: /list/ },
+        { value: [{ id: '   ', displayName: 'Bad', tickets: 1 }], error: /ID/ }
+      ];
+      for (const { value, error } of cases) {
+        current = await store.save(current.version, { manualParticipants: value, ticketOverrides: {} });
+        await assert.rejects(store.refresh(), error);
+        assert.deepEqual((await get('ticketAwards/currentDraw')).data().manualParticipants, value);
+      }
+
+      current = await store.save(current.version, {
+        manualParticipants: [{ id: 'ok', displayName: 'OK', tickets: 1 }],
+        ticketOverrides: { 'manual:ok': 1 }
+      });
+      await assert.rejects(store.refresh(), /ticket overrides/);
+
+      await persistRows([row('manual:collision', 0, 5)]);
+      current = await store.save(current.version, {
+        manualParticipants: [{ id: 'collision', displayName: 'Collision', tickets: 1 }],
+        ticketOverrides: {}
+      });
+      await assert.rejects(store.refresh(), /collides/);
     });
   } finally {
     const response = await fetch(`${origin}/emulator/v1/${database}/documents`, { method: 'DELETE' });

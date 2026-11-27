@@ -22,19 +22,25 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
       throw new Error('The draw changed in another operation. Refresh Latest Entries and try again.');
     }
   };
+  const MANUAL_UID_PREFIX = 'manual:';
+  const MAX_MANUAL_TICKETS = 10000;
+  const manualDisplayName = value => {
+    const name = typeof value === 'string' ? value.trim() : '';
+    return name || 'Participant';
+  };
   const entriesFor = (rows, draw) => {
     const excluded = new Set([...list(draw.excludedUids), ...list(draw.removedUids)]);
-    // Custom names/removals remain supported; prize weights must come from
-    // correct predictions, never a stale override or a manually invented UID.
-    if (list(draw.manualParticipants).length) {
-      throw new Error('Manual tickets are not prediction awards. Use Reset Edits before spinning.');
-    }
     const entries = [];
+    const leaderboardUids = new Set();
+
+    // Leaderboard prizes come from correct predictions. Custom quantities that
+    // differ from the authoritative count remain uncertifiable.
     for (const row of rows) {
       const correct = row.correct;
       if (!Number.isSafeInteger(correct) || correct < 0) {
         throw new Error('Invalid leaderboard ticket count. Recalculate the leaderboard before spinning.');
       }
+      leaderboardUids.add(row.uid);
       if (Object.hasOwn(draw.ticketOverrides || {}, row.uid) && draw.ticketOverrides[row.uid] !== correct) {
         throw new Error('Custom ticket quantities differ from prediction awards. Use Reset Edits before spinning.');
       }
@@ -42,6 +48,45 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
       const displayName = publicUsername(draw.nameOverrides?.[row.uid] ?? row.displayName);
       for (let count = 0; count < correct; count++) entries.push({ uid: row.uid, displayName });
     }
+
+    // Manual participants are an explicit administrator-configured source, not
+    // prediction awards. Certify them only when their identity and tickets are
+    // unambiguous so same-name people and concurrent edits cannot merge.
+    if (draw.manualParticipants !== undefined && !Array.isArray(draw.manualParticipants)) {
+      throw new Error('Invalid manual participant list. Fix it before refreshing.');
+    }
+    const manualIds = new Set();
+    for (const participant of list(draw.manualParticipants)) {
+      if (!participant || typeof participant !== 'object' || Array.isArray(participant)) {
+        throw new Error('Invalid manual participant record. Remove or fix it before refreshing.');
+      }
+      const id = participant.id;
+      if (typeof id !== 'string' || !id.trim()) {
+        throw new Error('Manual participant ID is missing or invalid. Remove or fix it before refreshing.');
+      }
+      if (manualIds.has(id)) {
+        throw new Error('Duplicate manual participant ID. Remove or fix it before refreshing.');
+      }
+      manualIds.add(id);
+      const uid = `${MANUAL_UID_PREFIX}${id}`;
+      if (leaderboardUids.has(uid)) {
+        throw new Error('Manual participant ID collides with a leaderboard UID. Fix it before refreshing.');
+      }
+      if (typeof participant.displayName !== 'string' || !participant.displayName.trim()) {
+        throw new Error('Manual participant name is missing or invalid. Remove or fix it before refreshing.');
+      }
+      const tickets = participant.tickets;
+      if (!Number.isSafeInteger(tickets) || tickets < 0 || tickets > MAX_MANUAL_TICKETS) {
+        throw new Error(`Invalid manual participant ticket count. Use 0-${MAX_MANUAL_TICKETS} whole tickets before refreshing.`);
+      }
+      if (Object.hasOwn(draw.ticketOverrides || {}, uid)) {
+        throw new Error('Manual participant ticket overrides are ambiguous. Edit the participant tickets instead.');
+      }
+      if (excluded.has(uid)) continue;
+      const displayName = manualDisplayName(participant.displayName);
+      for (let count = 0; count < tickets; count++) entries.push({ uid, displayName });
+    }
+
     return entries;
   };
 
@@ -101,7 +146,7 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
       }
       const winningIndex = Math.floor(random * entries.length);
       const selected = entries[winningIndex];
-      const winner = { uid: selected.uid, displayName: publicUsername(selected.displayName),
+      const winner = { uid: selected.uid, displayName: manualDisplayName(selected.displayName),
         ticketsAtWin: entries.filter(entry => entry.uid === selected.uid).length,
         drawnAt: serverTimestamp() };
       const updated = { ...current, entries: entries.filter(entry => entry.uid !== selected.uid),
@@ -127,7 +172,7 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
       }
       const entries = list(current.entries).filter(entry => entry.uid !== winner.uid);
       for (let count = 0; count < winner.ticketsAtWin; count++) {
-        entries.push({ uid: winner.uid, displayName: publicUsername(winner.displayName) });
+        entries.push({ uid: winner.uid, displayName: manualDisplayName(winner.displayName) });
       }
       const updated = { ...current, entries,
         excludedUids: current.excludedUids.filter(uid => uid !== winner.uid),
