@@ -2836,3 +2836,34 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--blue); outline-
 .game-card-bottom {
   font-family: 'Google Sans Mono', monospace;
 }
+
+/* Public navigation with the FAQ link. Scoped so the Admin dashboard is unchanged. */
+.nav-with-faq {
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.nav-with-faq a {
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) and (min-width: 769px) {
+  .nav-with-faq {
+    gap: 8px 12px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 768px) {
+  .nav-with-faq {
+    display: none;
+  }
+
+  .bottom-nav-with-faq a {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    justify-content: center;
+  }
+}
