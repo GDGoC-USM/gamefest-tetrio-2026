@@ -21,6 +21,14 @@ import {
   parseBulkParticipants
 } from "./lucky-draw-import.js";
 
+import {
+  labelRadiusFor,
+  segmentCenterAngle,
+  targetRotationForWinner
+} from "./lucky-wheel-geometry.js";
+
+import { launchConfetti } from "./lucky-confetti.js";
+
 // ==========================================
 // LUCKY DRAW CONFIGURATION
 // ==========================================
@@ -36,6 +44,7 @@ const $ = id => document.getElementById(id);
 const wheel = $("ldWheel");
 const spinBtn = $("ldSpinBtn");
 const refreshBtn = $("ldRefreshBtn");
+const presentationBtn = $("ldPresentationBtn");
 
 const participantsElement = $("ldParticipants");
 const ticketsElement = $("ldTickets");
@@ -86,6 +95,50 @@ let bulkPreviewText = "";
 let bulkPreviewExistingSignature = "";
 
 // ==========================================
+// PRESENTATION MODE
+// ==========================================
+
+function setPresentationMode(enabled) {
+  document.body.classList.toggle(
+    "ld-presentation-mode",
+    enabled
+  );
+
+  if (presentationBtn) {
+    presentationBtn.setAttribute(
+      "aria-pressed",
+      String(enabled)
+    );
+
+    presentationBtn.textContent = enabled
+      ? "EXIT PRESENTATION MODE"
+      : "ENTER PRESENTATION MODE";
+  }
+
+  // The wheel resizes with the presentation class. Realign labels without
+  // rebuilding segments, which would move the frozen winning segment.
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(positionWheelLabels);
+  }
+}
+
+if (presentationBtn) {
+  presentationBtn.addEventListener("click", () => {
+    const isActive = document.body.classList.contains(
+      "ld-presentation-mode"
+    );
+
+    setPresentationMode(!isActive);
+  });
+}
+
+document.addEventListener("admin-section-change", event => {
+  if (event.detail?.sectionId !== "luckydraw") {
+    setPresentationMode(false);
+  }
+});
+
+// ==========================================
 // MESSAGE
 // ==========================================
 
@@ -94,101 +147,6 @@ function message(text, type = "info") {
 
   messageElement.textContent = text;
   messageElement.className = `notice ${type}`;
-}
-
-// ==========================================
-// WINNER CONFETTI (VISUAL ONLY)
-// ==========================================
-
-function celebrateWinner() {
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-
-  const card = document.querySelector(".luckydraw-main");
-  if (!card) return;
-
-  let style = document.getElementById("ldConfettiStyles");
-
-  if (!style) {
-    style = document.createElement("style");
-    style.id = "ldConfettiStyles";
-    style.textContent = `
-      .ld-confetti-layer {
-        position: absolute;
-        inset: 0;
-        z-index: 10;
-        overflow: hidden;
-        pointer-events: none;
-      }
-
-      .ld-confetti-piece {
-        position: absolute;
-        top: -14px;
-        width: 8px;
-        height: 13px;
-        border-radius: 2px;
-        opacity: 0;
-        animation: ld-confetti-fall var(--fall-duration) ease-out var(--fall-delay) forwards;
-        will-change: transform, opacity;
-      }
-
-      @keyframes ld-confetti-fall {
-        0% {
-          opacity: 1;
-          transform: translate3d(0, 0, 0) rotate(0deg);
-        }
-        85% {
-          opacity: 1;
-        }
-        100% {
-          opacity: 0;
-          transform: translate3d(var(--drift), 80vh, 0) rotate(720deg);
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .ld-confetti-layer {
-          display: none;
-        }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  card.querySelector(".ld-confetti-layer")?.remove();
-
-  const layer = document.createElement("div");
-  layer.className = "ld-confetti-layer";
-  layer.setAttribute("aria-hidden", "true");
-
-  const colors = [
-    "#d5b0ff",
-    "#ff527b",
-    "#ffd166",
-    "#65d6c4",
-    "#ffffff"
-  ];
-
-  for (let index = 0; index < 56; index++) {
-    const piece = document.createElement("span");
-
-    piece.className = "ld-confetti-piece";
-    piece.style.left = `${Math.random() * 100}%`;
-    piece.style.backgroundColor = colors[index % colors.length];
-    piece.style.setProperty(
-      "--drift",
-      `${Math.round(Math.random() * 180 - 90)}px`
-    );
-    piece.style.setProperty("--fall-delay", `${Math.random() * 0.35}s`);
-    piece.style.setProperty(
-      "--fall-duration",
-      `${1.5 + Math.random() * 0.8}s`
-    );
-
-    layer.appendChild(piece);
-  }
-
-  card.appendChild(layer);
-  window.setTimeout(() => layer.remove(), 2800);
 }
 
 // Manual entries are administrator-entered text, not profile names. Keep their
@@ -293,7 +251,7 @@ async function loadSavedDraw() {
       ? data.entries.map(entry => ({ ...entry, displayName: entryDisplayName(entry) }))
       : [];
     winnerElement.innerHTML = data.lastWinner
-      ? `<span>LAST WINNER</span><strong>${escapeHTML(publicUsername(data.lastWinner.displayName))}</strong>`
+      ? `<span>LAST WINNER</span><strong>${escapeHTML(entryDisplayName(data.lastWinner))}</strong>`
       : `<span>WAITING FOR THE DRAW</span><strong>GOOD LUCK!</strong>`;
     renderParticipants();
     await loadHistory();
@@ -481,11 +439,12 @@ function renderEditor() {
   `).join("");
 }
 
-// ==========================================
-// RENDER PARTICIPANTS
-// ==========================================
 
-function renderParticipants() {
+ // ==========================================
+ // RENDER PARTICIPANTS
+ // ==========================================
+
+function renderParticipants({ preserveWheel = false } = {}) {
   const groups = getParticipantGroups();
 
   const totalTickets = currentEntries.length;
@@ -507,7 +466,10 @@ function renderParticipants() {
       </p>
     `;
 
-    renderWheel();
+    if (!preserveWheel) {
+      renderWheel();
+    }
+
     return;
   }
 
@@ -544,7 +506,9 @@ function renderParticipants() {
     `;
   }).join("");
 
-  renderWheel();
+  if (!preserveWheel) {
+    renderWheel();
+  }
 }
 
 // ==========================================
@@ -952,6 +916,10 @@ async function resetEdits() {
 // RENDER WHEEL WITH PARTICIPANT NAMES
 // ==========================================
 
+// Above this many tickets, radial labels cannot stay readable, so the wheel
+// falls back to a participant legend instead of overlapping text.
+const MAX_WHEEL_LABELS = 40;
+
 function renderWheel() {
   wheel.querySelectorAll(".ld-wheel-label").forEach(label => {
     label.remove();
@@ -960,6 +928,7 @@ function renderWheel() {
   if (!currentEntries.length) {
     wheel.style.background =
       "conic-gradient(#292346, #17142b, #292346)";
+    renderWheelLegend([]);
 
     return;
   }
@@ -989,32 +958,26 @@ function renderWheel() {
   wheel.style.background =
     `conic-gradient(${segments.join(",")})`;
 
-  // One label for every ticket.
-  currentEntries.forEach((entry, index) => {
-    const angle = (index + 0.5) * (360 / total);
+  if (total > MAX_WHEEL_LABELS) {
+    // Dense pool: keep every segment but move identity into a readable legend.
+    renderWheelLegend(currentEntries);
+  } else {
+    renderWheelLegend([]);
 
-    const label = document.createElement("span");
+    // One label for every ticket, so the label under the pointer matches the
+    // announced winner at rest.
+    currentEntries.forEach(entry => {
+      const label = document.createElement("span");
 
-    label.className = "ld-wheel-label";
-    label.textContent = entryDisplayName(entry);
-    label.title = label.textContent;
+      label.className = "ld-wheel-label";
+      label.textContent = entryDisplayName(entry);
+      label.title = label.textContent;
 
-    // Position each label along its ticket's radial line.
-    label.style.transform =
-      `translate(-50%, -50%) rotate(${angle}deg) translateY(-108px) rotate(-90deg)`;
+      wheel.appendChild(label);
+    });
 
-    if (total > 30) {
-      label.style.fontSize = "6px";
-    } else if (total > 20) {
-      label.style.fontSize = "7px";
-    } else if (total > 12) {
-      label.style.fontSize = "8px";
-    } else {
-      label.style.fontSize = "10px";
-    }
-
-    wheel.appendChild(label);
-  });
+    positionWheelLabels();
+  }
 
   const center = wheel.querySelector(".luckydraw-wheel-center");
 
@@ -1023,55 +986,175 @@ function renderWheel() {
   }
 }
 
+// Re-place existing labels for the current wheel size without rebuilding the
+// segments, so resizing or presentation mode cannot change the frozen winner.
+function positionWheelLabels() {
+  const labels = wheel.querySelectorAll(".ld-wheel-label");
+
+  if (!labels.length) return;
+
+  const total = Number(labels[0].dataset.total) || labels.length;
+  const labelRadius = labelRadiusFor(wheel.clientWidth);
+  // Scale with the actual rendered wheel, including presentation/viewport
+  // changes. Narrow ticket arcs still need smaller text.
+  const density = labels.length === 1 ? 1 : total > 30 ? 0.6 : total > 20 ? 0.7 : total > 12 ? 0.8 : 1;
+  const fontSize = Math.max(6, wheel.clientWidth * 0.04 * density);
+
+  labels.forEach((label, index) => {
+    const angle = segmentCenterAngle(Number(label.dataset.index ?? index), total);
+    label.style.fontSize = `${fontSize}px`;
+
+    label.style.transform =
+      `translate(-50%, -50%) rotate(${angle}deg) translateY(-${labelRadius}px) rotate(-90deg)`;
+  });
+}
+
+function renderWheelLegend(entries) {
+  const legend = $("ldWheelLegend");
+
+  if (!legend) return;
+
+  if (!entries.length) {
+    legend.hidden = true;
+    legend.textContent = "";
+
+    return;
+  }
+
+  const groups = new Map();
+
+  entries.forEach((entry, index) => {
+    if (!groups.has(entry.uid)) {
+      groups.set(entry.uid, {
+        displayName: entryDisplayName(entry),
+        tickets: 0,
+        ranges: []
+      });
+    }
+
+    groups.get(entry.uid).tickets++;
+    const ranges = groups.get(entry.uid).ranges;
+    const last = ranges[ranges.length - 1];
+    if (last && last[1] === index) last[1] = index + 1;
+    else ranges.push([index + 1, index + 1]);
+  });
+
+  legend.innerHTML = [...groups.values()].map(person => `
+    <span class="ld-wheel-legend-item">
+      <span class="ld-wheel-legend-name">${escapeHTML(person.displayName)}</span>
+      <span class="ld-wheel-legend-count">#${person.ranges.map(([start, end]) => start === end ? start : `${start}–${end}`).join(", ")} · ${person.tickets}</span>
+    </span>
+  `).join("");
+
+  legend.hidden = false;
+}
+
 // ==========================================
 // SPIN WHEEL
 // ==========================================
 
 async function spinWheel() {
   if (!isAuthorized || isSpinning) return;
+
   isSpinning = true;
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
+
   message("Validating tickets and saving the winner...");
+
   let committed = false;
+
   try {
+    // Use the transaction-based draw store to select and save the winner.
     const result = await drawStore.spin(drawVersion);
     committed = true;
+
     const { entries, winningIndex, winner, draw } = result;
-    const winnerName = publicUsername(winner.displayName);
+    const winnerName = entryDisplayName(winner);
+
     currentEntries = entries;
     renderWheel();
-    winnerElement.innerHTML = `<span>GOOD LUCK!</span><strong>SPINNING...</strong>`;
-    const winningCenter = (winningIndex + 0.5) * (360 / entries.length);
-    const normalizedRotation = ((currentRotation % 360) + 360) % 360;
-    const offset = ((360 - winningCenter - normalizedRotation) % 360 + 360) % 360;
-    currentRotation += 360 * 6 + offset;
+
+    winnerElement.innerHTML = `
+      <span>GOOD LUCK!</span>
+      <strong>SPINNING...</strong>
+    `;
+
+    // Rotate the wheel so the winning segment's centre stops under the top
+    // pointer, continuing forward from the current rotation.
+    currentRotation = targetRotationForWinner(
+      currentRotation,
+      winningIndex,
+      entries.length,
+      6
+    );
+
     wheel.style.transform = `rotate(${currentRotation}deg)`;
-    await new Promise(resolve => setTimeout(resolve, 5200));
+
+    await new Promise(resolve => {
+      setTimeout(resolve, 5200);
+    });
+
+    // Update the saved draw information.
     loadDrawSettings(draw);
     drawVersion = draw.version;
     currentEntries = draw.entries;
-    winnerElement.innerHTML = `
-      <span>WINNER!</span><strong>${escapeHTML(winnerName)}</strong>
-      <small>Selected from ${winner.ticketsAtWin} ${winner.ticketsAtWin === 1 ? "entry" : "entries"}!</small>`;
-    renderParticipants();
+    // A numbered marker maps the dense wheel's resting pointer to its legend.
+    if (entries.length > MAX_WHEEL_LABELS) {
+      const marker = document.createElement("span");
+      marker.className = "ld-wheel-label";
+      marker.textContent = `#${winningIndex + 1}`;
+      marker.dataset.index = winningIndex;
+      marker.dataset.total = entries.length;
+      wheel.appendChild(marker);
+      positionWheelLabels();
+    }
 
-    // Trigger confetti only after the winner is confirmed and displayed.
-    celebrateWinner();
+    // Display the winner.
+    winnerElement.innerHTML = `
+      <span>🎉 CONGRATULATIONS! 🎉</span>
+      <strong>${escapeHTML(winnerName)}</strong>
+      <small>
+        Selected from ${winner.ticketsAtWin} ${
+          winner.ticketsAtWin === 1 ? "entry" : "entries"
+        }!
+      </small>
+    `;
+
+    // Celebrate and update the participant information.
+    launchConfetti();
+
+    renderParticipants({ preserveWheel: true });
 
     await loadHistory();
-    message(`${winnerName} has won! Their entries are excluded and the winner is saved.`, "success");
+
+    message(
+      `${winnerName} has won! Their entries are excluded and the winner is saved.`,
+      "success"
+    );
+
   } catch (error) {
     drawVersion = null;
     currentEntries = [];
+
     renderParticipants();
-    message(`${committed ? "Winner saved; reload the draw to recover its display" : "Draw not confirmed; refresh entries and history before retrying"}: ${error.message}`, "error");
+
+    message(
+      `${
+        committed
+          ? "Winner saved; reload the draw to recover its display"
+          : "Draw not confirmed; refresh entries and history before retrying"
+      }: ${error.message}`,
+      "error"
+    );
+
   } finally {
     isSpinning = false;
     refreshBtn.disabled = !isAuthorized;
     spinBtn.disabled = !isAuthorized || currentEntries.length === 0;
   }
 }
+
 
 // ==========================================
 // UNDO ANY SELECTED WINNER
@@ -1084,7 +1167,7 @@ async function undoSelectedWinner(historyId) {
     message("Winner record not found. Refresh and try again.", "error");
     return;
   }
-  const winnerName = publicUsername(selectedWinner.displayName);
+  const winnerName = entryDisplayName(selectedWinner);
   if (!confirm(`Undo ${winnerName}'s win? Historical entries will be restored. Refresh Latest Entries to validate current weights before spinning again.`)) return;
   isSpinning = true;
   spinBtn.disabled = true;
@@ -1096,7 +1179,7 @@ async function undoSelectedWinner(historyId) {
     drawVersion = draw.version;
     currentEntries = draw.entries;
     winnerElement.innerHTML = draw.lastWinner
-      ? `<span>LAST WINNER</span><strong>${escapeHTML(publicUsername(draw.lastWinner.displayName))}</strong>`
+      ? `<span>LAST WINNER</span><strong>${escapeHTML(entryDisplayName(draw.lastWinner))}</strong>`
       : `<span>WAITING FOR THE DRAW</span><strong>GOOD LUCK!</strong>`;
     renderParticipants();
     await loadHistory();
@@ -1138,7 +1221,7 @@ async function loadHistory() {
         return {
           id: item.id,
           ...data,
-          displayName: publicUsername(data.displayName)
+          displayName: entryDisplayName(data)
         };
       })
       .sort((a, b) => {
@@ -1380,12 +1463,21 @@ if (resetEditsBtn) {
 refreshBtn.addEventListener("click", refreshTickets);
 spinBtn.addEventListener("click", spinWheel);
 
+// Keep radial labels centred in their segments when the viewport or
+// presentation mode changes the wheel size. Only labels move; the wheel
+// background and rotation (including a frozen result) stay untouched.
+if (wheel && typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => positionWheelLabels()).observe(wheel);
+}
+
 // ==========================================
 // ADMIN AUTHENTICATION
 // ==========================================
 
 onAuthStateChanged(auth, async user => {
   isAuthorized = false;
+  setPresentationMode(false);
+
   drawVersion = null;
   currentEntries = [];
   previousWinners = [];

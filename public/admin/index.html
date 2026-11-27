@@ -441,20 +441,38 @@
             <p>
               Every entry gives one chance to win.
             </p>
+
+            <button
+              type="button"
+              id="ldPresentationBtn"
+              class="btn secondary"
+              aria-pressed="false"
+            >
+              ENTER PRESENTATION MODE
+            </button>
           </div>
 
           <div class="luckydraw-wheel-area">
 
-            <div class="luckydraw-pointer">▼</div>
+            <div class="ld-wheel-stage">
+              <div class="luckydraw-pointer">▼</div>
 
-            <div id="ldWheel" class="luckydraw-wheel">
+              <div id="ldWheel" class="luckydraw-wheel">
 
-              <div class="luckydraw-wheel-center">
-                <span>GAMEFEST</span>
-                <strong>SPIN</strong>
+                <div class="luckydraw-wheel-center">
+                  <span>GAMEFEST</span>
+                  <strong>SPIN</strong>
+                </div>
+
               </div>
-
             </div>
+
+            <div
+              id="ldWheelLegend"
+              class="ld-wheel-legend"
+              aria-label="Wheel participants"
+              hidden
+            ></div>
 
           </div>
 

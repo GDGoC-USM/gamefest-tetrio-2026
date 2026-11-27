@@ -87,9 +87,18 @@ async function persist(action) {
 
 function showAdminSection(sectionId) {
   if (busy) return;
+
+  // Notify other admin modules that the dashboard section is changing.
+  document.dispatchEvent(
+    new CustomEvent("admin-section-change", {
+      detail: { sectionId }
+    })
+  );
+
   document.querySelectorAll(".nav-btn").forEach(button => {
     button.classList.toggle("active", button.dataset.section === sectionId);
   });
+
   document.querySelectorAll(".admin-section").forEach(section => {
     section.hidden = section.id !== sectionId;
   });

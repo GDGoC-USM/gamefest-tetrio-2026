@@ -69,6 +69,14 @@
   margin: 20px auto 30px;
 }
 
+.ld-wheel-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
 .luckydraw-pointer {
   position: relative;
   z-index: 3;
@@ -80,7 +88,7 @@
 
 .luckydraw-wheel {
   position: relative;
-  width: min(340px, 75vw, 100%);
+  width: min(420px, 88vw, 100%);
   aspect-ratio: 1;
   border: 9px solid #d4b1ff;
   border-radius: 50%;
@@ -103,8 +111,7 @@
   top: 50%;
   left: 50%;
 
-  width: 105px;
-  max-width: 105px;
+  width: 30%;
 
   color: #ffffff;
 
@@ -129,6 +136,62 @@
   user-select: none;
 }
 
+/* Readable fallback for dense pools: identity moves off the segments. */
+.ld-wheel-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+  gap: 2px 14px;
+
+  width: min(100%, 680px);
+  min-width: 0;
+  max-height: 168px;
+  margin-top: 18px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  overflow-y: auto;
+
+  text-align: left;
+
+  background: #17142b;
+  border: 1px solid #33234e;
+  border-radius: 10px;
+}
+
+.ld-wheel-legend[hidden] {
+  display: none;
+}
+
+.ld-wheel-legend-item {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+
+  padding: 3px 0;
+
+  border-bottom: 1px solid #2a2345;
+
+  font-size: 12px;
+  color: #e9e2ff;
+}
+
+.ld-wheel-legend-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ld-wheel-legend-count {
+  flex: none;
+  max-width: 50%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: #c8a5ff;
+  font-weight: 700;
+}
+
 /* ==========================================
    WHEEL CENTRE
 ========================================== */
@@ -137,11 +200,11 @@
   position: absolute;
   top: 50%;
   left: 50%;
-
   z-index: 2;
 
-  width: 100px;
-  height: 100px;
+  width: clamp(76px, 24%, 110px);
+  aspect-ratio: 1;
+  box-sizing: border-box;
 
   transform: translate(-50%, -50%);
 
@@ -149,6 +212,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
 
   background: #17142b;
   border: 5px solid #d4b1ff;
@@ -159,15 +223,17 @@
 
 .luckydraw-wheel-center span {
   color: #c8a5ff;
-  font-size: 9px;
+  font-size: clamp(7px, 1.8vw, 9px);
   font-weight: 700;
   letter-spacing: .1em;
+  text-align: center;
 }
 
 .luckydraw-wheel-center strong {
   color: #fff;
   font-family: 'Google Sans', sans-serif;
-  font-size: 22px;
+  font-size: clamp(16px, 4vw, 24px);
+  line-height: 1;
 }
 
 /* ==========================================
@@ -624,6 +690,17 @@
 
 @media (max-width: 700px) {
 
+  .luckydraw-wheel-area {
+    width: 100%;
+    margin: 24px auto;
+    padding: 0 4px;
+    box-sizing: border-box;
+  }
+
+  .luckydraw-wheel {
+    width: min(420px, 88vw, 100%);
+  }
+
   .luckydraw-stats {
     grid-template-columns: 1fr;
     gap: 0;
@@ -705,5 +782,236 @@
 
   .ld-editor-actions button {
     flex: 1;
+  }
+}
+
+/* ==========================================
+   WINNER CONFETTI
+========================================== */
+
+.ld-confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ld-confetti-piece {
+  position: absolute;
+  top: -20px;
+  left: var(--x);
+
+  width: 9px;
+  height: 14px;
+
+  background: var(--color);
+  border-radius: 2px;
+
+  opacity: 0;
+
+  animation:
+    ld-confetti-fall
+    var(--duration)
+    var(--delay)
+    ease-out
+    forwards;
+}
+
+@keyframes ld-confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, -5vh, 0) rotate(0deg);
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate3d(var(--drift), 110vh, 0)
+      rotate(var(--rotation));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ld-confetti {
+    display: none;
+  }
+}
+
+/* ==========================================
+   LUCKY DRAW PRESENTATION MODE
+========================================== */
+
+body.ld-presentation-mode {
+  background: #0b0b16;
+  padding: 0;
+}
+
+/* Collapse the parent layout as well as hiding the sidebar. */
+body.ld-presentation-mode .admin-main {
+  max-width: none;
+  padding: 0;
+}
+
+body.ld-presentation-mode #adminContent {
+  display: block;
+}
+
+body.ld-presentation-mode .topbar,
+body.ld-presentation-mode .site-footer,
+body.ld-presentation-mode .dashboard-heading,
+body.ld-presentation-mode .admin-nav,
+body.ld-presentation-mode #dashboardMessage,
+body.ld-presentation-mode #luckydraw > .admin-section-heading,
+body.ld-presentation-mode #luckydraw > .luckydraw-stats,
+body.ld-presentation-mode #luckydraw > .admin-card:not(.luckydraw-main),
+body.ld-presentation-mode .luckydraw-heading > .eyebrow,
+body.ld-presentation-mode .luckydraw-heading > p {
+  display: none !important;
+}
+
+body.ld-presentation-mode #luckydraw {
+  width: 100%;
+  padding: 8px;
+}
+
+body.ld-presentation-mode #luckydraw .luckydraw-main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  width: 100%;
+  height: calc(100dvh - 16px);
+  margin: 0;
+  padding: 12px;
+}
+
+body.ld-presentation-mode .luckydraw-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+}
+
+body.ld-presentation-mode .luckydraw-heading h3 {
+  margin: 0;
+  font-size: clamp(16px, 2.4vw, 28px);
+  letter-spacing: .03em;
+}
+
+body.ld-presentation-mode #ldPresentationBtn {
+  max-width: 50%;
+  padding: 8px;
+  font-size: 11px;
+}
+
+body.ld-presentation-mode .luckydraw-wheel-area {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* Size the wheel against the space left after the winner and controls,
+   not just viewport width. Container sizing also accounts for the legend. */
+body.ld-presentation-mode .ld-wheel-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  container-type: size;
+  height: 100%;
+  min-height: 0;
+}
+
+body.ld-presentation-mode .luckydraw-wheel {
+  width: min(calc(100cqw - 24px), calc(100cqh - 32px), 640px);
+}
+
+body.ld-presentation-mode .luckydraw-pointer {
+  position: absolute;
+  top: calc(50% - min(50cqw - 12px, 50cqh - 16px, 320px) - 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 26px;
+  line-height: 1;
+}
+
+body.ld-presentation-mode .ld-wheel-legend {
+  max-height: min(96px, 18dvh);
+  margin-top: 4px;
+  padding: 4px 8px;
+}
+
+body.ld-presentation-mode .luckydraw-winner {
+  min-width: 0;
+  max-height: min(140px, 22dvh);
+  gap: 4px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+}
+
+body.ld-presentation-mode .luckydraw-winner strong {
+  font-size: clamp(18px, 3vw, 32px);
+}
+
+body.ld-presentation-mode .luckydraw-actions {
+  flex-direction: row;
+  gap: 8px;
+}
+
+body.ld-presentation-mode .luckydraw-actions button {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  padding: 9px 6px;
+  font-size: 11px;
+}
+
+body.ld-presentation-mode #ldMessage {
+  max-height: 3.4em;
+  margin: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+/* Short/wide screens put the operator controls beside the wheel. */
+@media (min-aspect-ratio: 4/3) {
+  body.ld-presentation-mode #luckydraw .luckydraw-main {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-rows: auto 1fr auto auto 1fr;
+  }
+
+  body.ld-presentation-mode .luckydraw-heading {
+    grid-column: 1 / -1;
+  }
+
+  body.ld-presentation-mode .luckydraw-wheel-area {
+    grid-column: 1;
+    grid-row: 2 / 6;
+    height: 100%;
+  }
+
+  body.ld-presentation-mode .luckydraw-winner {
+    grid-column: 2;
+    grid-row: 3;
+    max-height: 45dvh;
+  }
+
+  body.ld-presentation-mode .luckydraw-actions {
+    grid-column: 2;
+    grid-row: 4;
+  }
+
+  body.ld-presentation-mode #ldMessage {
+    grid-column: 2;
+    grid-row: 5;
+    align-self: start;
   }
 }
