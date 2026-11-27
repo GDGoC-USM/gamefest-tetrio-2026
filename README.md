@@ -32,6 +32,7 @@ There is no `package.json` or build step. Pure regression scenarios use Node's b
     ├── matches.html          Tournament rooms and published results
     ├── predict.html          Audience prediction interface
     ├── leaderboard.html      Public rankings
+    ├── faq.html              Participant FAQ and user guide
     ├── firestore.rules       Database permissions and prediction validation
     ├── admin/
     │   └── index.html        Admin dashboard and Lucky Draw interface
