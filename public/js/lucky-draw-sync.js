@@ -46,7 +46,7 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
       }
       if (excluded.has(row.uid)) continue;
       const displayName = publicUsername(draw.nameOverrides?.[row.uid] ?? row.displayName);
-      for (let count = 0; count < correct; count++) entries.push({ uid: row.uid, displayName });
+      for (let count = 0; count < correct + 1; count++) entries.push({ uid: row.uid, displayName });
     }
 
     // Manual participants are an explicit administrator-configured source, not

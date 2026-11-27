@@ -337,7 +337,7 @@ function getEditorParticipants() {
 
       const originalTickets = Math.max(
         0,
-        Math.floor(Number(person.correct) || 0)
+        1 + Math.floor(Number(person.correct) || 0)
       );
 
       const tickets = Object.prototype.hasOwnProperty.call(
