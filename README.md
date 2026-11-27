@@ -269,9 +269,16 @@ Open the Hosting URL printed by the CLI, normally `http://localhost:5000`. Serve
 
 On exactly `localhost`, `127.0.0.1` or `[::1]`, the client routes Auth/Firestore to `127.0.0.1:9099`/`127.0.0.1:8080`; unavailable emulators do not fall back to production. The emulator UI normally opens at `http://127.0.0.1:4000`. Run all three services, not Hosting alone; the client expects those fixed Auth/Firestore ports.
 
-**Current browser setup blocker:** `--project demo-gamefest` selects the CLI/UI project but does **not** replace the browser's checked-in `projectId: "gamefest-tetrio-2026"`. `singleProjectMode: false` allows multiple local namespaces; it does not align Auth accounts, UI documents or loaded rules. An account/admin document created in the demo UI is not a verified browser-admin setup. Rule tests below explicitly load rules into their own demo namespaces; they do not verify cross-service browser configuration.
+**Authenticated browser verification:** the generic `demo-gamefest` command does not rewrite the browser's production project ID. For isolated Lucky Draw browser checks, prepare an ignored Hosting copy with a demo-only configuration, then start all three emulators in that same namespace:
 
-Until an explicitly authorized local namespace/rules setup is established, use this command for startup/HTTP preview and demo rule tests for authorization checks; do not claim authenticated browser flows are verified. Do not change tracked identifiers, use live accounts or bypass rules to hide the mismatch. See Firebase's [project-ID alignment requirement](https://firebase.google.com/docs/emulator-suite/connect_firestore#choose_a_firebase_project).
+```sh
+node tests/lucky-draw.browser.mjs --prepare
+firebase emulators:exec --config .local/pr51/firebase.json --only auth,firestore,hosting --project demo-pr51 "node tests/lucky-draw.browser.mjs"
+```
+
+The browser check requires Playwright installed outside the application; set `PLAYWRIGHT_MODULE` to its absolute package directory if it is not available through Node's normal module resolution. Select Java 21+ first. The preparation copies `public/` into `.local/pr51/public/` and replaces only that ignored copy's `firebase-config.js` with synthetic `demo-pr51` configuration. Re-run preparation after source changes. Tracked Firebase identifiers, permissions and production configuration remain unchanged; checked-in rules are loaded into the demo emulator. Do not serve this copy on a deployed host or use live accounts.
+
+The test signs in through the actual admin page with a synthetic Email/Password account, exercises refresh/spin/history/reload/undo/import and stale-revision rejection, checks presentation bounds at desktop/mobile/short-landscape sizes, and saves screenshots/results under `.local/pr51/`. External application-backend requests are blocked. The default `demo-gamefest` startup is still only an HTTP preview unless its browser configuration is separately aligned. See Firebase's [project-ID alignment requirement](https://firebase.google.com/docs/emulator-suite/connect_firestore#choose_a_firebase_project).
 
 Use only loopback URLs. LAN IPs, custom hostnames and deployed/PR-preview hosts do not enable emulator routing and retain production configuration. Never use them for destructive testing. `Ctrl+C` stops the suite; without explicit import/export, emulator state is disposable. Keep synthetic artifacts in ignored `.local/`, never real participant exports.
 

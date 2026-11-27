@@ -964,11 +964,6 @@ function renderWheel() {
   } else {
     renderWheelLegend([]);
 
-    const fontSize =
-      total > 30 ? "6px" :
-      total > 20 ? "7px" :
-      total > 12 ? "8px" : "10px";
-
     // One label for every ticket, so the label under the pointer matches the
     // announced winner at rest.
     currentEntries.forEach(entry => {
@@ -977,7 +972,6 @@ function renderWheel() {
       label.className = "ld-wheel-label";
       label.textContent = entryDisplayName(entry);
       label.title = label.textContent;
-      label.style.fontSize = fontSize;
 
       wheel.appendChild(label);
     });
@@ -999,11 +993,16 @@ function positionWheelLabels() {
 
   if (!labels.length) return;
 
-  const total = labels.length;
+  const total = Number(labels[0].dataset.total) || labels.length;
   const labelRadius = labelRadiusFor(wheel.clientWidth);
+  // Scale with the actual rendered wheel, including presentation/viewport
+  // changes. Narrow ticket arcs still need smaller text.
+  const density = labels.length === 1 ? 1 : total > 30 ? 0.6 : total > 20 ? 0.7 : total > 12 ? 0.8 : 1;
+  const fontSize = Math.max(6, wheel.clientWidth * 0.04 * density);
 
   labels.forEach((label, index) => {
-    const angle = segmentCenterAngle(index, total);
+    const angle = segmentCenterAngle(Number(label.dataset.index ?? index), total);
+    label.style.fontSize = `${fontSize}px`;
 
     label.style.transform =
       `translate(-50%, -50%) rotate(${angle}deg) translateY(-${labelRadius}px) rotate(-90deg)`;
@@ -1024,21 +1023,26 @@ function renderWheelLegend(entries) {
 
   const groups = new Map();
 
-  entries.forEach(entry => {
+  entries.forEach((entry, index) => {
     if (!groups.has(entry.uid)) {
       groups.set(entry.uid, {
         displayName: entryDisplayName(entry),
-        tickets: 0
+        tickets: 0,
+        ranges: []
       });
     }
 
     groups.get(entry.uid).tickets++;
+    const ranges = groups.get(entry.uid).ranges;
+    const last = ranges[ranges.length - 1];
+    if (last && last[1] === index) last[1] = index + 1;
+    else ranges.push([index + 1, index + 1]);
   });
 
   legend.innerHTML = [...groups.values()].map(person => `
     <span class="ld-wheel-legend-item">
       <span class="ld-wheel-legend-name">${escapeHTML(person.displayName)}</span>
-      <span class="ld-wheel-legend-count">${person.tickets}</span>
+      <span class="ld-wheel-legend-count">#${person.ranges.map(([start, end]) => start === end ? start : `${start}–${end}`).join(", ")} · ${person.tickets}</span>
     </span>
   `).join("");
 
@@ -1095,6 +1099,16 @@ async function spinWheel() {
     loadDrawSettings(draw);
     drawVersion = draw.version;
     currentEntries = draw.entries;
+    // A numbered marker maps the dense wheel's resting pointer to its legend.
+    if (entries.length > MAX_WHEEL_LABELS) {
+      const marker = document.createElement("span");
+      marker.className = "ld-wheel-label";
+      marker.textContent = `#${winningIndex + 1}`;
+      marker.dataset.index = winningIndex;
+      marker.dataset.total = entries.length;
+      wheel.appendChild(marker);
+      positionWheelLabels();
+    }
 
     // Display the winner.
     winnerElement.innerHTML = `
