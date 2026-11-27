@@ -217,6 +217,47 @@ test('participant cleanup authorization, revision fencing and durable recovery',
       assert.equal((await get('predictions/alice_A')).exists(), true);
       assert.deepEqual((await saved('ticketAwards/currentDraw')).excludedUids, ['alice']);
     });
+    await t.test('cleanup winning the race invalidates an in-flight spin without creating an award', async () => {
+      await reset();
+      const current = await saved('ticketAwards/currentDraw');
+      const prepared = await store.preview(['alice']);
+      beforeCommit = async writes => {
+        if (!writes.some(item => item.update?.name.includes('/ticketAwards/'))) return;
+        beforeCommit = null;
+        await store.run(prepared);
+      };
+      await assert.rejects(draw.spin(current.version), /outdated|synchronization/);
+      assert.equal((await job()).phase, 'complete');
+      assert.equal((await get('leaderboard/alice')).exists(), false);
+      const awards = await firebase.getDocs('ticketAwards');
+      assert.deepEqual(awards.docs.map(item => item.id), ['currentDraw']);
+      assert.deepEqual((await saved('ticketAwards/currentDraw')).excludedUids, []);
+      const refreshed = (await draw.refresh()).draw;
+      assert.equal(refreshed.entries.some(entry => entry.uid === 'alice'), false);
+    });
+    await t.test('undo after recalculation restores eligibility but requires current weights before spinning', async () => {
+      await reset();
+      await seed('ticketAwards/currentDraw', { version: 'only-alice', leaderboardVersion: (await saved('settings/leaderboardRevision')).version,
+        entries: [{ uid: 'alice', displayName: 'Same Name' }, { uid: 'alice', displayName: 'Same Name' }], excludedUids: [] });
+      const selected = await draw.spin('only-alice');
+      await firebase.runTransaction(firebase.db, async transaction => {
+        await revisions.assertIdle(transaction);
+        transaction.set('rooms/A', { players: ['Red', 'Blue', 'Green', '', '', '', '', ''],
+          qualifiers: ['Red', 'Green'], resultsPublished: true, status: 'completed', formatVersion: 2 });
+        revisions.invalidate(transaction);
+      });
+      await recalculate();
+      assert.equal((await saved('leaderboard/alice')).correct, 1);
+      const undone = await draw.undo(selected.historyId);
+      assert.equal(undone.entries.filter(entry => entry.uid === 'alice').length, 2);
+      assert.equal((await get(`ticketAwards/${selected.historyId}`)).exists(), false);
+      assert.deepEqual(undone.excludedUids, []);
+      await assert.rejects(draw.spin(undone.version), /outdated/);
+      const refreshed = (await draw.refresh()).draw;
+      assert.equal(refreshed.entries.filter(entry => entry.uid === 'alice').length, 1);
+      const winner = await draw.spin(refreshed.version);
+      assert.equal(winner.winner.ticketsAtWin, 1);
+    });
     await t.test('partial chunk failure survives a new store and retry deletes only remaining sources', async () => {
       await reset();
       const writes = Array.from({ length: 451 }, (_, index) => replacement(`predictions/bulk-${index}`, pick('alice')));
