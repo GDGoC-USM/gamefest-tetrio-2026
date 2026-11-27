@@ -143,6 +143,22 @@ Refresh brackets one server leaderboard query with revision checks and preserves
 
 Integration requires compatible rules first, then Hosting, with all old admin tabs closed/reloaded. Recalculate once to initialize the revision, then refresh entries; no automatic migration or production recalculation runs. Every future leaderboard/source cleanup writer must atomically bump this revision and leave it dirty until recalculated. Old clients or direct backend writes that ignore the protocol are unsupported; pause admin operations during cutover.
 
+### Safe test-participant removal (#39)
+
+Under **Admin → Prediction Settings → Leaderboard Management**, load participants, search by full name or UID, select one or several accounts, and preview removal. Confirm the displayed UIDs and prediction/leaderboard record counts. Duplicate names are not identities. Any Lucky Draw award record or winner exclusion blocks the entire selection; cleanup never deletes awards or exclusions.
+
+Removal deletes selected `leaderboard/<uid>` documents and all `predictions` documents whose `uid` matches, including legacy/duplicate submissions. It preserves Auth accounts, `profiles`, rooms, stage settings, other participants and scoring. Recalculation can adjust remaining sequential ranks without changing their scores. This is not a ban: preserved accounts may submit new predictions after cleanup completes.
+
+`settings/participantCleanup` is an admin-only durable job containing the selected UIDs, operation/revision IDs, phase (`review`, `deleting`, `recalculating`, `complete`), deletion counts and server timestamp. Previewing is read-only. Execution claims a new dirty leaderboard revision with `cleanupPending:true`, then revalidates the preview against server data before deleting anything. Changed previews require another preview/confirmation. Rules freeze selected owners' prediction creates, edits and resets while the job is active; reads and profile edits retain their existing permissions. Other owners remain unaffected.
+
+Every deletion chunk (at most 450 deletes plus its job update) checks job/revision ownership and current winner exclusions transactionally. Award lookups query selected UIDs in groups of at most 30; no per-ticket reads or listeners are added. The existing scorer, profile queries, ranking and changed-row writer perform recalculation under the same pending fence. Only the final transaction marks both the job complete and the revision ready. Refresh Lucky Draw entries afterwards; stale tickets cannot spin.
+
+**Recovery:** after a query, deletion, recalculation or acknowledgement failure, reload the dashboard, select **Load participants → Preview interrupted cleanup**, review remaining counts, and confirm again. The server retains UIDs even after their rows disappear. Retries use a new revision to fence old workers, query only remaining records, and preserve cumulative committed deletion counts. A failed/interrupted job keeps draws and competing scoring operations blocked, including during recalculation. Never manually clear this job or `cleanupPending`; resume through the dashboard. A complete job proves its final recalculation committed even if the browser missed the acknowledgement. No automatic recovery or destructive action runs on sign-in.
+
+**Required #29 integration for Eve — release coordination, not an assumed schema:** this branch has no audience import/base participation source records. Before shipping #29 with cleanup, add every persisted base-award, registration/import and UID-link source that can recreate a leaderboard row to this removal's UID-scoped preview, revalidation, deletion and resumable counts. Delete the selected participant's recreating records, not merely their computed row; preserve unrelated import participants, Auth accounts, public profiles, awards and exclusions. If an import document contains multiple participants, remove only the selected identities transactionally. Extend the active-job owner/source-write fence to registration, linking, import and base-award writers so they cannot recreate sources during recovery. Do not choose collection names here or delete competitor rosters.
+
+Eve must also integrate **every** #29 scoring/source writer with #27: atomically invalidate `settings/leaderboardRevision` (`version` changes, `ready:false`) before changing scoring sources; reject overlap with pending cleanup, and fence chunked writes/recalculation by revision ownership. Only complete owning recalculation may certify `ready:true`; preserve `cleanupPending:true` for this job until its final atomic completion. Extend the existing absolute scorer/recalculator to include approved #29 sources, and extend cleanup emulator tests for mixed selected/unselected imports, retries, concurrent import/link writes and stale draw rejection. Do not deploy #29 and this cleanup together without that integration.
+
 Stored ranks preserve descending correct counts, alphabetical names and stable ordering for identical names. Public ties still share a rank, with UID ordering after name comparison. A rename can legitimately move several stored ranks within a tie. Full-name changes never change prediction selections or UID-based entry ownership. Reopening still clears results and dependent predictions through the existing workflow; recalculation simply reflects the remaining published results.
 
 Illustrative estimates below assume 150 leaderboard rows, 150 connected leaderboard viewers and 150 participating profiles. They are **not production usage or emulator billing measurements**:
@@ -353,6 +369,12 @@ Focused draw/revision checks:
 
 ```sh
 firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/lucky-draw.rules.test.mjs tests/leaderboard-revision.rules.test.mjs tests/leaderboard-sync.rules.test.mjs tests/profiles.rules.test.mjs"
+```
+
+Focused participant-cleanup checks (including authorization, recovery and unchanged scoring):
+
+```sh
+firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/participant-cleanup.rules.test.mjs tests/prediction-lock.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
 ```
 
 Stop an existing suite first if it occupies port 8080. `emulators:exec` starts Firestore, sets `FIRESTORE_EMULATOR_HOST` for its child and stops it afterwards. Tests reject non-loopback hosts, use unique disposable `demo-*` namespaces, install checked-in rules and clean their fixtures. They check allowed/denied profiles/moderation, exact public leaderboard schemas, private predictions, room locks/stages/readiness/results and absolute leaderboard sync. No Auth emulator login/service-account key is needed. Without `FIRESTORE_EMULATOR_HOST`, rule tests **skip**; a skip is not verification.

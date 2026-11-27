@@ -1,20 +1,30 @@
 import {
   auth, db, signIn, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  isAdmin, collection, doc, getDoc, getDocsFromServer as getDocs, setDoc, writeBatch, runTransaction,
+  isAdmin, collection, doc, getDoc, getDocFromServer, getDocsFromServer as getDocs, setDoc, writeBatch, runTransaction,
   serverTimestamp, escapeHTML, showMessage, query, where
 } from "./shared.js";
 import {
   ROOM_CONFIG, STAGES, isPlayer, playerLabel, roomReady,
   validateGroupResult, validateSeriesResult, validateFFAResult,
-  deriveRooms, dependentRoomIds, calculateLeaderboard,
+  deriveRooms, dependentRoomIds,
   publishedDependentIds, dependentResets, withoutResults
 } from "./tournament.js";
 import { parseRosterCSV, prepareRosterImport } from "./roster-import.js";
 import { DEFAULT_USERNAME, publicUsername } from "./usernames.js";
-import { rankLeaderboardRows, planLeaderboardChanges } from "./leaderboard-sync.js";
+import { createLeaderboardRecalculator } from "./leaderboard-recalculate.js";
 import { createLeaderboardRevisionStore } from "./leaderboard-revision.js";
+import { createParticipantCleanupStore } from "./participant-cleanup.js";
 
 const leaderboardRevision = createLeaderboardRevisionStore({ db, doc, runTransaction, serverTimestamp });
+const recalculateLeaderboard = createLeaderboardRecalculator({
+  db, doc, collection, query, where, getDocs, runTransaction, serverTimestamp,
+  revisions: leaderboardRevision
+});
+const participantCleanup = createParticipantCleanupStore({
+  db, doc, collection, query, where, getDoc: getDocFromServer, getDocs, runTransaction,
+  serverTimestamp, revisions: leaderboardRevision,
+  recalculate: recalculateLeaderboard
+});
 
 const $ = id => document.getElementById(id);
 const adminLogin = $("adminLogin");
@@ -30,6 +40,10 @@ let authorized = false;
 let rosterPreview = null;
 let adminAuthEpoch = 0;
 let moderationProfiles = new Map();
+let managementRows = [];
+let managementSelection = new Set();
+let cleanupPreview = null;
+let cleanupJob = null;
 const configFor = id => ROOM_CONFIG.find(config => config.id === id);
 const stableJSON = value => JSON.stringify(value, (_key, item) =>
   item && typeof item === "object" && !Array.isArray(item)
@@ -67,6 +81,7 @@ async function persist(action) {
     $("roomStatus").disabled = published(editorRoom);
     $("saveRosterImportBtn").disabled = !rosterPreview?.plan.changedRoomIds.length;
     $("resetUsernameBtn").disabled = !authorized || !moderationProfiles.has($("moderationUid").value);
+    renderLeaderboardManagement();
   }
 }
 
@@ -122,6 +137,13 @@ onAuthStateChanged(auth, async user => {
   authorized = false;
   clearRosterPreview();
   clearUsernameModeration();
+  managementRows = [];
+  managementSelection.clear();
+  cleanupPreview = null;
+  cleanupJob = null;
+  $("cleanupPreview").replaceChildren();
+  $("cleanupMessage").textContent = "";
+  renderLeaderboardManagement();
   adminLogin.hidden = true;
   adminContent.hidden = true;
   authBtn.hidden = false;
@@ -822,43 +844,93 @@ $("resetUsernameBtn").addEventListener("click", () => persist(async () => {
     "Full name reset. It will appear on the leaderboard after the next successful recalculation.", "success");
 }));
 
-async function readLeaderboardUsernames(uids) {
-  const usernames = new Map();
-  for (let index = 0; index < uids.length; index += 30) {
-    const snapshot = await getDocs(query(collection(db, "profiles"),
-      where("__name__", "in", uids.slice(index, index + 30))));
-    snapshot.docs.forEach(item => usernames.set(item.id, publicUsername(item.data().username)));
-  }
-  return usernames;
+function renderLeaderboardManagement() {
+  const pending = cleanupJob && cleanupJob.phase !== "complete";
+  const search = $("participantSearch").value.trim().toLocaleLowerCase();
+  $("participantList").innerHTML = managementRows.filter(row =>
+    row.displayName.toLocaleLowerCase().includes(search) || row.uid.toLocaleLowerCase().includes(search)
+  ).map(row => `<label class="empty-slot-label"><input type="checkbox" data-participant-uid="${escapeHTML(row.uid)}"
+    ${managementSelection.has(row.uid) ? "checked" : ""} ${pending ? "disabled" : ""}>
+    <span>${escapeHTML(row.displayName)} · ${escapeHTML(row.uid)} · ${escapeHTML(String(row.points))} points</span></label>`).join("");
+  $("participantSelectionCount").textContent = `${managementSelection.size} selected${pending ? " · interrupted cleanup must finish first" : ""}`;
+  $("previewCleanupBtn").disabled = !authorized || !managementSelection.size || !!pending;
+  $("resumeCleanupBtn").hidden = !pending;
+  $("confirmCleanupBtn").disabled = !authorized || !cleanupPreview || cleanupPreview.conflicts.length > 0;
 }
 
-async function recalculateLeaderboard(expectedVersion) {
-  const version = await leaderboardRevision.begin(expectedVersion);
-  const [predictionSnapshot, roomSnapshot, leaderboardSnapshot] = await Promise.all([
-    getDocs(collection(db, "predictions")), getDocs(collection(db, "rooms")),
-    getDocs(collection(db, "leaderboard"))
-  ]);
-  const rooms = Object.fromEntries(roomSnapshot.docs.map(item => [item.id, item.data()]));
-  const predictions = predictionSnapshot.docs.map(item => ({ ...item.data(), id: item.id }));
-  const scores = calculateLeaderboard(predictions, rooms);
-  const usernames = await readLeaderboardUsernames(scores.map(row => row.uid));
-  const rows = rankLeaderboardRows(scores, usernames);
-  const existing = new Map(leaderboardSnapshot.docs.map(item => [item.id, item.data()]));
-  const changes = planLeaderboardChanges(rows, existing);
-  // Full replacement repairs obsolete fields; unchanged rows retain their timestamps.
-  const operations = changes.upserts.map(row => transaction => transaction.set(doc(db, "leaderboard", row.uid), {
-    ...row, updatedAt: serverTimestamp()
-  }));
-  changes.deletes.forEach(uid => operations.push(transaction => transaction.delete(doc(db, "leaderboard", uid))));
-  for (let index = 0; index < operations.length; index += 450) {
-    await runTransaction(db, async transaction => {
-      await leaderboardRevision.assert(transaction, version);
-      operations.slice(index, index + 450).forEach(operation => operation(transaction));
+async function loadLeaderboardManagement() {
+  const epoch = adminAuthEpoch;
+  const [snapshot, job] = await Promise.all([getDocs(collection(db, "leaderboard")), participantCleanup.load()]);
+  if (epoch !== adminAuthEpoch || !authorized) return;
+  cleanupJob = job;
+  managementRows = snapshot.docs.map(item => ({ uid: item.id,
+    displayName: publicUsername(item.data().displayName), points: item.data().points }));
+  managementSelection.clear();
+  if (job && job.phase !== "complete") {
+    job.uids.forEach(uid => {
+      managementSelection.add(uid);
+      if (!managementRows.some(row => row.uid === uid)) managementRows.push({ uid, displayName: "Participant", points: 0 });
     });
+    showMessage($("cleanupMessage"), `Interrupted cleanup (${job.phase}): ${job.deletedPredictions} predictions and ${job.deletedRows} leaderboard rows deleted. Preview interrupted cleanup to retry. Lucky Draw remains blocked.`);
+  } else {
+    showMessage($("cleanupMessage"), "Select participants by UID. Duplicate names may belong to different accounts.");
+    if (job?.phase === "complete") {
+      showMessage($("cleanupMessage"), `Last cleanup complete and leaderboard recalculated: ${job.deletedPredictions} predictions and ${job.deletedRows} selected rows deleted. Select participants by UID for another removal.`);
+    }
   }
-  await leaderboardRevision.finish(version);
-  return { written: changes.upserts.length, deleted: changes.deletes.length };
+  cleanupPreview = null;
+  $("cleanupPreview").replaceChildren();
+  renderLeaderboardManagement();
 }
+
+async function previewParticipantCleanup() {
+  cleanupPreview = null;
+  const epoch = adminAuthEpoch;
+  const prepared = await participantCleanup.preview([...managementSelection]);
+  if (epoch !== adminAuthEpoch || !authorized) return;
+  cleanupJob = prepared.job;
+  cleanupPreview = prepared;
+  $("cleanupPreview").innerHTML = `<h4>Removal preview</h4><ul>${prepared.participants.map(item =>
+    `<li>${escapeHTML(item.uid)}: ${item.predictions} predictions, ${item.row ? 1 : 0} leaderboard row</li>`).join("")}</ul>
+    <p>Auth accounts, public profiles, awards, exclusions and tournament rooms are preserved. No base participation/import records exist in this version.</p>`;
+  showMessage($("cleanupMessage"), prepared.conflicts.length
+    ? `Removal blocked: Lucky Draw award or winner exclusion for ${prepared.conflicts.join(", ")}. Nothing will be deleted.`
+    : "Review every UID and record count, then confirm removal and recalculation.", prepared.conflicts.length ? "error" : "info");
+  renderLeaderboardManagement();
+}
+
+$("loadParticipantsBtn").addEventListener("click", () => persist(loadLeaderboardManagement));
+$("participantSearch").addEventListener("input", renderLeaderboardManagement);
+$("participantList").addEventListener("change", event => {
+  const uid = event.target.dataset.participantUid;
+  if (!uid) return;
+  if (event.target.checked) managementSelection.add(uid);
+  else managementSelection.delete(uid);
+  cleanupPreview = null;
+  $("cleanupPreview").replaceChildren();
+  renderLeaderboardManagement();
+});
+$("previewCleanupBtn").addEventListener("click", () => persist(previewParticipantCleanup));
+$("resumeCleanupBtn").addEventListener("click", () => persist(async () => {
+  await loadLeaderboardManagement();
+  await previewParticipantCleanup();
+}));
+$("confirmCleanupBtn").addEventListener("click", () => persist(async () => {
+  if (!cleanupPreview || cleanupPreview.conflicts.length) return;
+  if (!confirm(`Remove these participants and their predictions?\n${cleanupPreview.uids.join("\n")}\n\nAuth accounts and profiles remain. The leaderboard will be recalculated. This cannot restore deleted predictions.`)) return;
+  const prepared = cleanupPreview;
+  cleanupPreview = null;
+  try {
+    const result = await participantCleanup.run(prepared);
+    await loadLeaderboardManagement();
+    showMessage($("cleanupMessage"), `Cleanup complete and leaderboard recalculated: ${result.deletedPredictions} predictions and ${result.deletedRows} selected rows deleted. Refresh Lucky Draw entries before spinning.`, "success");
+  } catch (error) {
+    // Reload the durable job after a lost acknowledgement; local counts are not proof.
+    try { await loadLeaderboardManagement(); } catch { /* Preserve the original failure. */ }
+    throw new Error(`Cleanup did not report completion: ${error.message} Load participants, then preview interrupted cleanup to retry safely. If the job is complete, recalculation committed. Never clear its revision fence manually.`);
+  }
+}));
+
 
 $("recalculateLeaderboardBtn").addEventListener("click", () => persist(async () => {
   const result = await recalculateLeaderboard();

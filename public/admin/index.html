@@ -358,6 +358,26 @@
           <p class="muted">Recomputes absolute correct-pick totals and full names, including legacy predictions. Only changed rows are written. Sign-in does not recalculate. Refresh Lucky Draw entries after recalculation.</p>
         </div>
 
+        <div class="admin-card" id="leaderboardManagement">
+          <h3>Leaderboard Management</h3>
+          <p>Remove test participants by UID, not by name. Removes leaderboard rows and predictions, not accounts or public profiles. Lucky Draw awards or winner exclusions block removal.</p>
+          <button type="button" class="btn secondary" id="loadParticipantsBtn">Load participants</button>
+          <div class="field">
+            <label for="participantSearch">Search by full name or UID</label>
+            <input id="participantSearch" type="search" autocomplete="off">
+          </div>
+          <p id="participantSelectionCount" role="status">0 selected</p>
+          <div id="participantList"></div>
+          <div class="form-actions">
+            <button type="button" class="btn secondary" id="previewCleanupBtn" disabled>Preview selected removal</button>
+            <button type="button" class="btn secondary" id="resumeCleanupBtn" hidden>Preview interrupted cleanup</button>
+            <button type="button" class="btn red" id="confirmCleanupBtn" disabled>Confirm removal and recalculate</button>
+          </div>
+          <div id="cleanupPreview"></div>
+          <p id="cleanupMessage" class="admin-message" role="status" aria-live="polite"></p>
+          <p class="muted">Interrupted cleanup is saved on the server. Load participants after reloading to resume; Lucky Draw stays blocked until cleanup and recalculation finish. Removal is not a permanent ban: preserved accounts can submit new predictions afterwards.</p>
+        </div>
+
         <div class="admin-card">
           <h3>Full name moderation</h3>
           <p>Reset an inappropriate audience full name to Participant. Predictions, scores and Lucky Draw entries are retained. The user can choose another name later.</p>
