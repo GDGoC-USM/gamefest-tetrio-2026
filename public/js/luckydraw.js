@@ -13,6 +13,12 @@ import {
 } from "./shared.js";
 import { publicUsername } from "./usernames.js";
 import { createDrawStore } from "./lucky-draw-sync.js";
+import {
+  createManualParticipantId,
+  manualDisplayName,
+  normalizeParticipantName,
+  parseBulkParticipants
+} from "./lucky-draw-import.js";
 
 // ==========================================
 // LUCKY DRAW CONFIGURATION
@@ -47,6 +53,14 @@ const editorList = $("ldEditorList");
 const editorCount = $("ldEditorCount");
 const resetEditsBtn = $("ldResetEditsBtn");
 
+// Bulk import elements.
+const bulkNamesInput = $("ldBulkNames");
+const bulkPreviewBtn = $("ldBulkPreviewBtn");
+const bulkPreview = $("ldBulkPreview");
+const bulkSummary = $("ldBulkSummary");
+const bulkPreviewList = $("ldBulkPreviewList");
+const bulkImportBtn = $("ldBulkImportBtn");
+
 // ==========================================
 // DRAW STATE
 // ==========================================
@@ -66,6 +80,9 @@ let previousWinners = [];
 let isSpinning = false;
 let isAuthorized = false;
 let currentRotation = 0;
+let bulkPreviewState = null;
+let bulkPreviewText = "";
+let bulkPreviewExistingSignature = "";
 
 // ==========================================
 // MESSAGE
@@ -76,6 +93,14 @@ function message(text, type = "info") {
 
   messageElement.textContent = text;
   messageElement.className = `notice ${type}`;
+}
+
+// Manual entries are administrator-entered text, not profile names. Keep their
+// spelling and case, and render them only through textContent/escapeHTML.
+function entryDisplayName(entry) {
+  return String(entry?.uid || "").startsWith("manual:")
+    ? manualDisplayName(entry.displayName)
+    : publicUsername(entry.displayName);
 }
 
 // ==========================================
@@ -150,6 +175,7 @@ async function saveDrawSettings() {
 
 async function loadSavedDraw() {
   if (!isAuthorized || isSpinning) return;
+  clearBulkPreview();
   isSpinning = true;
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
@@ -168,7 +194,7 @@ async function loadSavedDraw() {
     loadDrawSettings(data);
     leaderboardParticipants = leaderboardSnapshot.docs.map(item => ({ ...item.data(), uid: item.id }));
     currentEntries = Array.isArray(data.entries)
-      ? data.entries.map(entry => ({ ...entry, displayName: publicUsername(entry.displayName) }))
+      ? data.entries.map(entry => ({ ...entry, displayName: entryDisplayName(entry) }))
       : [];
     winnerElement.innerHTML = data.lastWinner
       ? `<span>LAST WINNER</span><strong>${escapeHTML(publicUsername(data.lastWinner.displayName))}</strong>`
@@ -193,6 +219,7 @@ async function loadSavedDraw() {
 
 async function refreshTickets() {
   if (!isAuthorized || isSpinning) return;
+  clearBulkPreview();
   isSpinning = true;
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
@@ -230,7 +257,7 @@ function getParticipantGroups() {
     if (!groups.has(entry.uid)) {
       groups.set(entry.uid, {
         uid: entry.uid,
-        displayName: publicUsername(entry.displayName),
+        displayName: entryDisplayName(entry),
         tickets: 0
       });
     }
@@ -282,7 +309,7 @@ function getEditorParticipants() {
     .filter(person => !excludedUids.includes(`manual:${person.id}`))
     .map(person => ({
       uid: `manual:${person.id}`,
-      displayName: publicUsername(person.displayName),
+      displayName: manualDisplayName(person.displayName),
       tickets: Math.max(0, Math.floor(Number(person.tickets) || 0))
     }));
 
@@ -458,7 +485,9 @@ async function updateParticipant(uid, displayName, tickets) {
     Math.min(10000, Math.floor(Number(tickets) || 0))
   );
 
-  const safeName = publicUsername(cleanName);
+  const safeName = uid.startsWith("manual:")
+    ? manualDisplayName(cleanName)
+    : publicUsername(cleanName);
 
   if (uid.startsWith("manual:")) {
     const manualId = uid.substring("manual:".length);
@@ -556,13 +585,13 @@ async function addManualParticipant(event, operationStarted = false) {
     return;
   }
 
-  const id = `manual-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+  const id = createManualParticipantId(
+    manualParticipants.map(person => person.id)
+  );
 
   const participant = {
     id,
-    displayName: publicUsername(displayName),
+    displayName: manualDisplayName(displayName),
     tickets
   };
 
@@ -591,6 +620,186 @@ async function addManualParticipant(event, operationStarted = false) {
     `${participant.displayName} has been added with ${tickets} ${
       tickets === 1 ? "ticket" : "tickets"
     }.`,
+    "success"
+  );
+}
+
+// ==========================================
+// BULK MANUAL IMPORT
+// ==========================================
+
+function bulkExistingSignature() {
+  return getEditorParticipants()
+    .map(person => normalizeParticipantName(person.displayName))
+    .sort()
+    .join("\n");
+}
+
+function clearBulkPreview() {
+  bulkPreviewState = null;
+  bulkPreviewText = "";
+  bulkPreviewExistingSignature = "";
+
+  if (bulkPreview) bulkPreview.hidden = true;
+  if (bulkPreviewList) bulkPreviewList.replaceChildren();
+
+  if (bulkSummary) {
+    bulkSummary.textContent = "";
+    bulkSummary.className = "ld-bulk-summary";
+  }
+
+  if (bulkImportBtn) {
+    bulkImportBtn.disabled = true;
+    bulkImportBtn.textContent = "IMPORT PARTICIPANTS";
+  }
+}
+
+function renderBulkPreview(result) {
+  if (!bulkPreview) return;
+
+  bulkPreview.hidden = false;
+  const plural = result.total === 1 ? "" : "s";
+
+  if (!result.entries.length) {
+    if (bulkSummary) {
+      bulkSummary.textContent = result.errors[0] || "No names to preview.";
+      bulkSummary.className = "ld-bulk-summary ld-bulk-error";
+    }
+    if (bulkPreviewList) bulkPreviewList.replaceChildren();
+  } else {
+    const errorCount = result.errors.length;
+    const warning = result.duplicateCount === 1
+      ? "1 duplicate warning"
+      : `${result.duplicateCount} duplicate warnings`;
+    const errorNote = errorCount
+      ? ` · ${errorCount} name${errorCount === 1 ? "" : "s"} too long`
+      : "";
+
+    if (bulkSummary) {
+      bulkSummary.textContent =
+        `${result.total} participant${plural} · ${warning}${errorNote}`;
+      bulkSummary.className = errorCount
+        ? "ld-bulk-summary ld-bulk-error"
+        : "ld-bulk-summary";
+    }
+
+    const rows = result.entries.map(entry => {
+      const row = document.createElement("div");
+      row.className = "ld-bulk-row";
+
+      if (entry.duplicate) row.classList.add("ld-bulk-duplicate");
+      if (entry.error) row.classList.add("ld-bulk-invalid");
+
+      const name = document.createElement("span");
+      name.className = "ld-bulk-name";
+      name.textContent = entry.name;
+
+      const meta = document.createElement("span");
+      meta.className = "ld-bulk-meta";
+
+      if (entry.error) {
+        meta.textContent = entry.error;
+      } else if (entry.duplicate) {
+        const reasons = [];
+        if (entry.duplicateInPaste) reasons.push("duplicate in list");
+        if (entry.duplicateExisting) reasons.push("already in wheel");
+        meta.textContent = reasons.join(" · ");
+      }
+
+      row.append(name, meta);
+      return row;
+    });
+
+    if (bulkPreviewList) bulkPreviewList.replaceChildren(...rows);
+  }
+
+  if (bulkImportBtn) {
+    bulkImportBtn.disabled = !result.canImport;
+    bulkImportBtn.textContent = result.canImport
+      ? `IMPORT ${result.total} PARTICIPANT${plural.toUpperCase()}`
+      : "FIX VALIDATION ERRORS";
+  }
+}
+
+function previewBulkImport() {
+  if (!isAuthorized || isSpinning || !bulkNamesInput) return;
+
+  const text = bulkNamesInput.value;
+  const result = parseBulkParticipants(
+    text,
+    getEditorParticipants().map(person => person.displayName)
+  );
+
+  bulkPreviewState = result;
+  bulkPreviewText = text;
+  bulkPreviewExistingSignature = bulkExistingSignature();
+
+  renderBulkPreview(result);
+}
+
+async function importBulkPreview(operationStarted = false) {
+  if (!isAuthorized || (isSpinning && !operationStarted)) return;
+  if (!bulkPreviewState?.canImport) return;
+
+  if ((bulkNamesInput?.value || "") !== bulkPreviewText) {
+    clearBulkPreview();
+    message("The participant list changed after preview. Preview it again before importing.", "error");
+    return;
+  }
+
+  if (bulkPreviewExistingSignature !== bulkExistingSignature()) {
+    clearBulkPreview();
+    message("Participant names changed after preview. Preview the list again before importing.", "error");
+    return;
+  }
+
+  const imported = [];
+  const usedIds = new Set(manualParticipants.map(person => person.id));
+
+  for (const entry of bulkPreviewState.entries) {
+    const id = createManualParticipantId(usedIds);
+    usedIds.add(id);
+    imported.push({ id, displayName: entry.name, tickets: 1 });
+  }
+
+  const previousParticipants = manualParticipants;
+  const previousEntries = currentEntries;
+
+  manualParticipants = [...manualParticipants, ...imported];
+  currentEntries = [
+    ...currentEntries,
+    ...imported.map(person => ({
+      uid: `manual:${person.id}`,
+      displayName: person.displayName
+    }))
+  ];
+
+  try {
+    // One transaction persists every imported participant and invalidates the
+    // certified ticket pool with the existing draw-version fence.
+    await saveDrawSettings();
+  } catch (error) {
+    manualParticipants = previousParticipants;
+    currentEntries = previousEntries;
+    renderParticipants();
+    throw error;
+  }
+
+  const duplicateCount = bulkPreviewState.duplicateCount;
+  const totalPeople = getEditorParticipants().length;
+
+  clearBulkPreview();
+
+  if (bulkNamesInput) {
+    bulkNamesInput.value = "";
+  }
+
+  renderParticipants();
+
+  message(
+    `Imported ${imported.length} participant${imported.length === 1 ? "" : "s"}` +
+    `${duplicateCount ? ` with ${duplicateCount} duplicate warning${duplicateCount === 1 ? "" : "s"}` : ""}. ` +
+    `Duplicates remain separate participants. The wheel now lists ${totalPeople} participants.`,
     "success"
   );
 }
@@ -691,7 +900,7 @@ function renderWheel() {
     const label = document.createElement("span");
 
     label.className = "ld-wheel-label";
-    label.textContent = publicUsername(entry.displayName);
+    label.textContent = entryDisplayName(entry);
     label.title = label.textContent;
 
     // Position each label along its ticket's radial line.
@@ -1019,6 +1228,43 @@ if (addEntryForm) {
 }
 
 // ==========================================
+// BULK IMPORT EVENTS
+// ==========================================
+
+if (bulkPreviewBtn) {
+  bulkPreviewBtn.addEventListener("click", previewBulkImport);
+}
+
+if (bulkNamesInput) {
+  bulkNamesInput.addEventListener("input", clearBulkPreview);
+}
+
+if (bulkImportBtn) {
+  bulkImportBtn.addEventListener("click", async () => {
+    if (!isAuthorized || isSpinning) return;
+
+    try {
+      isSpinning = true;
+      bulkImportBtn.disabled = true;
+      await importBulkPreview(true);
+    } catch (error) {
+      console.error("Bulk import error:", error);
+      message(
+        `Unable to import participants: ${error.message} The draw will be reloaded; preview the list again before retrying.`,
+        "error"
+      );
+      isSpinning = false;
+      await loadSavedDraw();
+    } finally {
+      isSpinning = false;
+      if (bulkImportBtn) {
+        bulkImportBtn.disabled = !bulkPreviewState?.canImport;
+      }
+    }
+  });
+}
+
+// ==========================================
 // RESET EDITS BUTTON
 // ==========================================
 
@@ -1042,6 +1288,7 @@ onAuthStateChanged(auth, async user => {
   drawVersion = null;
   currentEntries = [];
   previousWinners = [];
+  clearBulkPreview();
   renderParticipants();
 
   spinBtn.disabled = true;
