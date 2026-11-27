@@ -64,7 +64,7 @@ Page scripts share Firebase access through `shared.js`. The main Firestore colle
 - Semi-final winners enter `FINAL`; semi-final losers enter `THIRD`. The four quarter-final losers enter `PLACEMENT`: five FFA rounds, awarding 4/3/2/1 points per round. Total points determine fifth through eighth; tied totals leave placings pending until an organiser records an explicit decision.
 - Predictions select two group qualifiers (unordered for scoring) or one winner per head-to-head series. There are no predictions for FFA placement positions. Each correct selected player earns exactly **one point and one Lucky Draw entry**. Unresolved results remain pending, not incorrect.
 - Administrators control prediction availability by stage and can lock individual rooms under **Admin → Rooms**. A room accepts predictions only when its stage is open, its room lock is off, its players are ready, and its results are unpublished and status is not Ended. Locking or ending preserves saved picks and blocks new picks, edits and user resets; unlocking never overrides the other restrictions. Leaderboard recalculation replaces absolute totals from current published results; resaving an unchanged result never adds points again. Legacy semi-final/final picks receive no old bonuses or podium scoring.
-- Lucky Draw weights entries by `leaderboard.correct`, excludes zero-correct accounts and excludes winners until their award is undone. An existing saved pool requires **Refresh Latest Entries** after leaderboard changes; freshness is not automatically validated before spinning.
+- Lucky Draw weights entries by authoritative `leaderboard.correct`, excludes zero-correct accounts and excludes winners until their award is undone. **Refresh Latest Entries** validates counts against one complete leaderboard revision. Every spin transaction rejects dirty/outdated revisions and stale draw state, then atomically saves the winner, history and exclusion before animation. Custom names/removals remain supported; manual participants or differing ticket overrides block validation until **Reset Edits** removes them.
 
 Reopening clears the room's results, returns Upcoming and retains its roster and own predictions. Normal result/roster changes reset feeder rooms only when their ordered confirmed player keys change; reset-room predictions are deleted afterwards in batches of 450. Room updates, dependency checks and stale-source checks share one Firestore transaction; prediction deletion and leaderboard recalculation are separate.
 
@@ -86,14 +86,13 @@ These open issues are **not implemented guarantees**:
 
 | Issue | Remaining proposal or reported limitation |
 | --- | --- |
-| [#27](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/27) | Fresh ticket validation before spins and concurrent-draw protection |
 | [#29](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/29) | Pointer/winner synchronization, wheel readability/presentation mode, audience/Form imports and identity linking, one-time base participation points/entries |
 | [#30](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/30) | Shared transactional Google-name defaults now run on all four public pages; timestamped/ambiguous placeholders still require owner editing, not migration |
 | [#31](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/31) | Shared public auth controls and restoration states; denied Admin access preserves audience sessions; browser/storage-dependent persistence still needs environment-specific verification |
 | [#32](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/32) | Personal prediction statistics and highlighting the signed-in leaderboard row |
 | [#15](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/15) | Enforced administrator anti-abuse controls/monitoring; production provider settings are not established by source |
 
-There are currently **no base participation points**, no audience/Form importer and no registration-to-Auth link. The CSV importer below handles competitors, not wheel participants. Points equal correct picks; wheel weights use correct picks. Reported pointer/winner mismatches remain unresolved; do not present the animation as verified prize-selection accuracy or assume multiple administrators can draw safely together.
+There are currently **no base participation points**, no audience/Form importer and no registration-to-Auth link. The CSV importer below handles competitors, not wheel participants. Points equal correct picks; certified wheel weights use correct picks. Wheel presentation/readability remains separate work under #29; this change protects persisted selection, not every aspect of presentation.
 
 `README_FIRST.txt` retains event context but contains conflicting instructions: its create-project/combined-deploy sections do not apply to this configured repository; results can be corrected without reopening; resets are conditional; and cleanup recovery is not guaranteed for every failure. Follow this README/current source in those cases. Its organiser questions remain unresolved: THIRD is implemented as FT9 despite an FT5 rulebook reference, FFA ties need manual decisions, and roster completeness/knockout prediction intent need confirmation. Do not silently change the application to resolve intended requirements.
 
@@ -132,9 +131,17 @@ Public equal-score rows retain shared ranks and alphabetical name ordering, then
 
 Use **Admin → Prediction Settings → Recalculate leaderboard** to intentionally refresh names or repair stale data. Admin sign-in does not recalculate. Publishing, correcting or reopening results, roster changes and initialization trigger recalculation after successful room processing. Stage toggles, room locks and status-only saves do not. Unchanged published-result submissions recalculate only if the dependency guard allows them.
 
-Each recalculation reads predictions, rooms and the existing leaderboard once. Normal room changes read fresh rooms transactionally, then query only reset-room predictions. Caught delete-batch failures attempt refresh/recalculation and report leftovers, but a prediction-query failure bypasses that recovery and refresh/recalculation can also fail. Surviving picks score nothing **while their rooms are unpublished**, but can score after republishing; resolve cleanup before continuing. Recalculation deduplicates predictions, queries distinct participating profiles in document-ID groups of at most 30 and reuses one name map. It does not read a profile per prediction or attach public profile listeners.
+Each recalculation reads predictions, rooms and the existing leaderboard once from the server, deduplicates predictions, and queries distinct participating profiles in document-ID groups of at most 30. It adds no profile listeners or per-prediction profile reads. Scoring remains absolute and unchanged.
 
-The existing leaderboard snapshot is compared against the exact public schema and all persisted ranking values. New, changed, malformed or extra-field rows are fully replaced; obsolete participants are deleted. An unchanged row retains its `updatedAt`. An unchanged recalculation commits no batches. Write/delete batches remain capped at 450 operations; failures surface through the existing dashboard error path. If some batches committed before a later failure, explicitly recalculate again: totals remain absolute and repeatable.
+`settings/leaderboardRevision` is an admin-only four-field document: unique string `version`, boolean `ready`, boolean `cleanupPending`, and server `updatedAt`. Scoring-affecting room/roster changes and initialization atomically invalidate it before cleanup. Status-only saves, locks and stage toggles do not. Cleanup blocks competing scoring changes/recalculations until it settles. Query/delete failures skip automatic recalculation and keep draws blocked; resolve leftovers before explicitly recalculating. If a page closes during cleanup, an authorized maintainer must confirm that no cleanup is running, resolve leftovers, and clear `cleanupPending` while keeping `ready:false` before recalculating. Never clear it just to permit a draw.
+
+Recalculation claims a unique dirty revision before reading sources. Changed/malformed rows are replaced, obsolete rows deleted, and unchanged rows retain their timestamps. Chunks of at most 450 row operations transactionally check revision ownership; only a complete owning recalculation marks it ready. Failed or superseded workers cannot certify partial rows. Even unchanged recalculations use two revision writes (claim/finish), but no row writes; refresh is then required. Spins use two application document reads and two atomic writes, with no leaderboard scan or per-ticket reads; contention/security-rule lookups add operations.
+
+The estimates below count leaderboard-row writes only; revision control adds two writes and transaction reads per recalculation.
+
+Refresh brackets one server leaderboard query with revision checks and preserves current exclusions transactionally. An unchanged certified refresh adds no writes. Undo deletes history and restores eligibility/historical tickets in one transaction; refresh reconciles those tickets with current scores, without pinning a historical override. Concurrent stale spins/edits fail rather than overwrite winners.
+
+Integration requires compatible rules first, then Hosting, with all old admin tabs closed/reloaded. Recalculate once to initialize the revision, then refresh entries; no automatic migration or production recalculation runs. Every future leaderboard/source cleanup writer must atomically bump this revision and leave it dirty until recalculated. Old clients or direct backend writes that ignore the protocol are unsupported; pause admin operations during cutover.
 
 Stored ranks preserve descending correct counts, alphabetical names and stable ordering for identical names. Public ties still share a rank, with UID ordering after name comparison. A rename can legitimately move several stored ranks within a tie. Full-name changes never change prediction selections or UID-based entry ownership. Reopening still clears results and dependent predictions through the existing workflow; recalculation simply reflects the remaining published results.
 
@@ -254,7 +261,7 @@ On isolated test data, use existing controls rather than mass-deleting collectio
 2. Reopen published descendants deepest-first: FINAL/THIRD/PLACEMENT, then semi-finals, quarter-finals and groups as applicable. For unpublished Ended rooms use **Save Room → Upcoming**.
 3. Use **Reopen / Unpublish Results** for the tested published room. Its roster/own predictions remain; changed downstream feeders reset and their predictions are deleted. Review the actual affected-room confirmation.
 4. Check partial-cleanup errors, then **Recalculate leaderboard**. Recalculation repairs totals but does not delete leftover picks. Do not republish before cleanup is resolved: survivors can otherwise score.
-5. Undo synthetic Lucky Draw winners separately, then **Refresh Latest Entries**. Reopening does not clear draw history/exclusions or refresh the wheel. Undo restores historical entry weight; refresh reconciles it with current scores. Draw/history/undo use separate writes, so failures can leave partial state.
+5. Undo synthetic Lucky Draw winners separately, then **Refresh Latest Entries**. Reopening preserves history/exclusions but invalidates old pools. Undo restores historical tickets atomically; refresh validates current scores before another spin.
 
 Reopen is not an account/profile/prediction wipe or migration shortcut. Restart disposable emulators without import for a fresh session. Production cleanup, reopening and draw undo require separate explicit authorization.
 
@@ -340,6 +347,12 @@ With Java 21+ selected, run isolated rules checks:
 
 ```sh
 firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
+```
+
+Focused draw/revision checks:
+
+```sh
+firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/lucky-draw.rules.test.mjs tests/leaderboard-revision.rules.test.mjs tests/leaderboard-sync.rules.test.mjs tests/profiles.rules.test.mjs"
 ```
 
 Stop an existing suite first if it occupies port 8080. `emulators:exec` starts Firestore, sets `FIRESTORE_EMULATOR_HOST` for its child and stops it afterwards. Tests reject non-loopback hosts, use unique disposable `demo-*` namespaces, install checked-in rules and clean their fixtures. They check allowed/denied profiles/moderation, exact public leaderboard schemas, private predictions, room locks/stages/readiness/results and absolute leaderboard sync. No Auth emulator login/service-account key is needed. Without `FIRESTORE_EMULATOR_HOST`, rule tests **skip**; a skip is not verification.

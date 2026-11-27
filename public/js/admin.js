@@ -1,6 +1,6 @@
 import {
   auth, db, signIn, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  isAdmin, collection, doc, getDoc, getDocs, setDoc, writeBatch, runTransaction,
+  isAdmin, collection, doc, getDoc, getDocsFromServer as getDocs, setDoc, writeBatch, runTransaction,
   serverTimestamp, escapeHTML, showMessage, query, where
 } from "./shared.js";
 import {
@@ -12,6 +12,9 @@ import {
 import { parseRosterCSV, prepareRosterImport } from "./roster-import.js";
 import { DEFAULT_USERNAME, publicUsername } from "./usernames.js";
 import { rankLeaderboardRows, planLeaderboardChanges } from "./leaderboard-sync.js";
+import { createLeaderboardRevisionStore } from "./leaderboard-revision.js";
+
+const leaderboardRevision = createLeaderboardRevisionStore({ db, doc, runTransaction, serverTimestamp });
 
 const $ = id => document.getElementById(id);
 const adminLogin = $("adminLogin");
@@ -456,12 +459,13 @@ async function predictionsForRooms(roomIds) {
   return [...references.values()];
 }
 
-// Room state, the dependency guard and the stale check commit in one transaction.
-// Prediction cleanup outside it is chunked: one batch cannot exceed 500 writes.
+// Room state, revision invalidation, dependency guards and stale checks commit together.
 async function writeRoomChanges(sources, resetIds, action, expected = roomsCache) {
-  await runTransaction(db, async transaction => {
-    const snapshots = await Promise.all(ROOM_CONFIG.map(config =>
-      transaction.get(doc(db, "rooms", config.id))));
+  const version = await runTransaction(db, async transaction => {
+    const [, snapshots] = await Promise.all([
+      action ? leaderboardRevision.assertIdle(transaction, { requireReady: true }) : null,
+      Promise.all(ROOM_CONFIG.map(config => transaction.get(doc(db, "rooms", config.id))))
+    ]);
     const fresh = {};
     snapshots.forEach(item => { if (item.exists()) fresh[item.id] = item.data(); });
     for (const id of sources.keys()) {
@@ -494,41 +498,49 @@ async function writeRoomChanges(sources, resetIds, action, expected = roomsCache
     updates.forEach((room, id) => {
       transaction.set(doc(db, "rooms", id), { ...room, updatedAt: serverTimestamp() });
     });
+    if (action) return leaderboardRevision.invalidate(transaction, { cleanupPending: resetIds.length > 0 });
   });
-  const predictionRefs = await predictionsForRooms(resetIds);
+  return cleanupDependentPredictions(resetIds, version);
+}
+
+async function cleanupDependentPredictions(resetIds, version) {
   let deleted = 0;
   let failure = "";
-  for (let index = 0; index < predictionRefs.length; index += 450) {
-    const chunk = predictionRefs.slice(index, index + 450);
-    const deletion = writeBatch(db);
-    chunk.forEach(reference => deletion.delete(reference));
-    try {
+  if (!resetIds.length) return { deleted, failure, resetIds, version };
+  try {
+    const predictionRefs = await predictionsForRooms(resetIds);
+    for (let index = 0; index < predictionRefs.length; index += 450) {
+      const chunk = predictionRefs.slice(index, index + 450);
+      const deletion = writeBatch(db);
+      chunk.forEach(reference => deletion.delete(reference));
       await deletion.commit();
-    } catch (error) {
-      failure = `Room results were saved, but only ${deleted} of ${predictionRefs.length} dependent predictions could be deleted: ${error.message}.`;
-      break;
+      deleted += chunk.length;
     }
-    deleted += chunk.length;
+  } catch (error) {
+    failure = `Room changes were saved, but dependent prediction cleanup failed after ${deleted} deletion(s): ${error.message}.`;
+  } finally {
+    // Keep the revision dirty even when querying or deleting predictions fails.
+    await leaderboardRevision.settleCleanup(version);
   }
-  return { deleted, failure, resetIds };
+  return { deleted, failure, resetIds, version };
 }
 
 async function writeRoomChange(id, source, resetIds, action, recalculate = true) {
   const outcome = await writeRoomChanges(new Map([[id, source]]), resetIds, action);
-  await refreshAfterWrite(id, recalculate);
+  await refreshAfterWrite(id, recalculate && !outcome.failure, outcome.version);
   if (outcome.failure) {
-    throw new Error(`${outcome.failure} The leaderboard was recalculated from the remaining published results; leftover predictions stay pending and score nothing until their rooms are reset again.`);
+    throw new Error(`${outcome.failure} Lucky Draw remains blocked. Resolve leftover predictions for ${resetIds.join(", ")}, then use Recalculate leaderboard.`);
   }
   return outcome;
 }
 
-async function refreshAfterWrite(id, recalculate = true) {
+async function refreshAfterWrite(id, recalculate = true, expectedVersion) {
   await fetchRooms();
   renderRooms();
   if (id) loadRoomEditor(id);
   if (!recalculate) return;
   try {
-    await recalculateLeaderboard();
+    await recalculateLeaderboard(expectedVersion);
   } catch (error) {
     throw new Error(`Room changes were saved, but leaderboard recalculation failed: ${error.message}. Use Recalculate leaderboard before the Lucky Draw.`);
   }
@@ -613,8 +625,8 @@ $("saveRosterImportBtn").addEventListener("click", () => persist(async () => {
   const outcome = await writeRoomChanges(sources, resetIds, action);
   clearRosterPreview();
   $("rosterCSV").value = "";
-  await refreshAfterWrite(editorId);
-  if (outcome.failure) throw new Error(`${outcome.failure} The leaderboard was recalculated; leftover predictions stay pending until their rooms are reset again.`);
+  await refreshAfterWrite(editorId, !outcome.failure, outcome.version);
+  if (outcome.failure) throw new Error(`${outcome.failure} Lucky Draw remains blocked. Resolve leftover predictions for ${resetIds.join(", ")}, then use Recalculate leaderboard.`);
   notify(`Roster imported for groups ${plan.changedRoomIds.join(", ")}. ${outcome.deleted} dependent prediction(s) deleted; group predictions retained.`, "success");
 }));
 
@@ -741,16 +753,25 @@ $("initializeTournamentBtn").addEventListener("click", () => persist(async () =>
   if (!confirm("Initialize / migrate this tournament?\n\n" +
     `Reset rooms: ${[...resetIds].join(", ") || "none"}.\n` +
     "All predictions for reset rooms will be deleted. Group players, metadata, results and predictions are retained exactly. Existing compatible rooms retain their results.\n\nContinue?")) return;
-  const predictions = await getDocs(collection(db, "predictions"));
-  const batch = writeBatch(db);
-  updates.forEach((room, id) => batch.set(doc(db, "rooms", id), {
-    ...room, updatedAt: serverTimestamp()
-  }));
-  predictions.docs.forEach(item => {
-    if (resetIds.has(item.data().roomId || item.data().matchId)) batch.delete(item.ref);
+  const version = await runTransaction(db, async transaction => {
+    const [, snapshots] = await Promise.all([
+      leaderboardRevision.assertIdle(transaction, { requireReady: true }),
+      Promise.all(ROOM_CONFIG.map(config => transaction.get(doc(db, "rooms", config.id))))
+    ]);
+    for (const snapshot of snapshots) {
+      const current = snapshot.exists() ? snapshot.data() : undefined;
+      if (!same(current, roomsCache[snapshot.id])) {
+        throw new Error("Tournament rooms changed while initialization was prepared. Reload the dashboard and try again. Nothing was changed.");
+      }
+    }
+    updates.forEach((room, id) => transaction.set(doc(db, "rooms", id), {
+      ...room, updatedAt: serverTimestamp()
+    }));
+    return leaderboardRevision.invalidate(transaction, { cleanupPending: resetIds.size > 0 });
   });
-  await batch.commit();
-  await refreshAfterWrite(editorId);
+  const outcome = await cleanupDependentPredictions([...resetIds], version);
+  await refreshAfterWrite(editorId, !outcome.failure, version);
+  if (outcome.failure) throw new Error(`${outcome.failure} Lucky Draw remains blocked. Resolve leftover predictions for ${[...resetIds].join(", ")}, then use Recalculate leaderboard.`);
   notify("Tournament format initialized. Group data and group predictions were retained.", "success");
 }));
 
@@ -811,7 +832,8 @@ async function readLeaderboardUsernames(uids) {
   return usernames;
 }
 
-async function recalculateLeaderboard() {
+async function recalculateLeaderboard(expectedVersion) {
+  const version = await leaderboardRevision.begin(expectedVersion);
   const [predictionSnapshot, roomSnapshot, leaderboardSnapshot] = await Promise.all([
     getDocs(collection(db, "predictions")), getDocs(collection(db, "rooms")),
     getDocs(collection(db, "leaderboard"))
@@ -824,15 +846,17 @@ async function recalculateLeaderboard() {
   const existing = new Map(leaderboardSnapshot.docs.map(item => [item.id, item.data()]));
   const changes = planLeaderboardChanges(rows, existing);
   // Full replacement repairs obsolete fields; unchanged rows retain their timestamps.
-  const operations = changes.upserts.map(row => batch => batch.set(doc(db, "leaderboard", row.uid), {
+  const operations = changes.upserts.map(row => transaction => transaction.set(doc(db, "leaderboard", row.uid), {
     ...row, updatedAt: serverTimestamp()
   }));
-  changes.deletes.forEach(uid => operations.push(batch => batch.delete(doc(db, "leaderboard", uid))));
+  changes.deletes.forEach(uid => operations.push(transaction => transaction.delete(doc(db, "leaderboard", uid))));
   for (let index = 0; index < operations.length; index += 450) {
-    const batch = writeBatch(db);
-    operations.slice(index, index + 450).forEach(operation => operation(batch));
-    await batch.commit();
+    await runTransaction(db, async transaction => {
+      await leaderboardRevision.assert(transaction, version);
+      operations.slice(index, index + 450).forEach(operation => operation(transaction));
+    });
   }
+  await leaderboardRevision.finish(version);
   return { written: changes.upserts.length, deleted: changes.deletes.length };
 }
 

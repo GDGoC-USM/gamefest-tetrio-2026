@@ -31,6 +31,15 @@ service cloud.firestore {
         && data.rank is int && data.rank >= 1
         && data.updatedAt is timestamp && data.updatedAt == request.time;
     }
+    function validLeaderboardRevision(data) {
+      return data.keys().hasAll(["version", "ready", "cleanupPending", "updatedAt"])
+        && data.keys().hasOnly(["version", "ready", "cleanupPending", "updatedAt"])
+        && data.version is string && data.version.size() > 0
+        && data.ready is bool
+        && data.cleanupPending is bool
+        && (!data.ready || !data.cleanupPending)
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
     function room(id) {
       return get(/databases/$(database)/documents/rooms/$(id)).data;
     }
@@ -147,9 +156,14 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    match /settings/leaderboardRevision {
+      allow get: if isAdmin();
+      allow create, update: if isAdmin() && validLeaderboardRevision(request.resource.data);
+      allow delete: if false;
+    }
     match /settings/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if id != "leaderboardRevision";
+      allow write: if id != "leaderboardRevision" && isAdmin();
     }
     match /predictions/{id} {
       allow get: if isAdmin() || ownsId(id) || (signedIn() && resource.data.uid == request.auth.uid);
