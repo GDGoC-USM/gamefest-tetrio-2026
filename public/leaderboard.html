@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -124,6 +123,47 @@
         </span>
 
       </div>
+
+      <!-- Personal summary is only visible to the signed-in account owner. -->
+      <section class="card personal-leaderboard-summary" id="personalLeaderboardSummary"
+        aria-labelledby="personalLeaderboardHeading" hidden>
+        <div class="personal-summary-heading">
+          <div>
+            <div class="eyebrow">YOUR PERFORMANCE</div>
+            <h3 id="personalLeaderboardHeading">YOUR PREDICTION STATS</h3>
+            <p class="muted" id="personalLeaderboardName">Loading your public name…</p>
+          </div>
+          <span class="you-indicator" aria-label="Your account">YOU</span>
+        </div>
+
+        <div class="personal-summary-grid">
+          <div class="personal-summary-stat">
+            <span>LEADERBOARD RANK</span>
+            <strong id="personalLeaderboardRank">—</strong>
+          </div>
+          <div class="personal-summary-stat">
+            <span>SUBMITTED TICKETS</span>
+            <strong id="personalLeaderboardTickets">—</strong>
+          </div>
+          <div class="personal-summary-stat">
+            <span>CORRECT PREDICTIONS</span>
+            <strong id="personalLeaderboardCorrect">—</strong>
+          </div>
+          <div class="personal-summary-stat">
+            <span>TOTAL POINTS</span>
+            <strong id="personalLeaderboardPoints">—</strong>
+          </div>
+        </div>
+
+        <div class="personal-summary-footer">
+          <p class="muted" id="personalLeaderboardStatus" role="status" aria-live="polite">
+            Loading your statistics…
+          </p>
+          <button type="button" class="btn secondary" id="findMyPosition" hidden>
+            FIND MY POSITION
+          </button>
+        </div>
+      </section>
 
       <section class="card leaderboard-card">
 
