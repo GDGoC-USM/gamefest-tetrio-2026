@@ -79,7 +79,7 @@
 
 .luckydraw-wheel {
   position: relative;
-  width: min(340px, 75vw, 100%);
+  width: min(420px, 88vw, 100%);
   aspect-ratio: 1;
   border: 9px solid #d4b1ff;
   border-radius: 50%;
@@ -102,8 +102,8 @@
   top: 50%;
   left: 50%;
 
-  width: 105px;
-  max-width: 105px;
+  width: min(112px, 30%);
+  max-width: 112px;
 
   color: #ffffff;
 
@@ -136,11 +136,11 @@
   position: absolute;
   top: 50%;
   left: 50%;
-
   z-index: 2;
 
-  width: 100px;
-  height: 100px;
+  width: clamp(76px, 24%, 110px);
+  aspect-ratio: 1;
+  box-sizing: border-box;
 
   transform: translate(-50%, -50%);
 
@@ -148,6 +148,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
 
   background: #17142b;
   border: 5px solid #d4b1ff;
@@ -158,15 +159,17 @@
 
 .luckydraw-wheel-center span {
   color: #c8a5ff;
-  font-size: 9px;
+  font-size: clamp(7px, 1.8vw, 9px);
   font-weight: 700;
   letter-spacing: .1em;
+  text-align: center;
 }
 
 .luckydraw-wheel-center strong {
   color: #fff;
   font-family: 'Google Sans', sans-serif;
-  font-size: 22px;
+  font-size: clamp(16px, 4vw, 24px);
+  line-height: 1;
 }
 
 /* ==========================================
@@ -489,6 +492,21 @@
 
 @media (max-width: 700px) {
 
+  .luckydraw-wheel-area {
+    width: 100%;
+    margin: 24px auto;
+    padding: 0 4px;
+    box-sizing: border-box;
+  }
+
+  .luckydraw-wheel {
+    width: min(420px, 88vw);
+  }
+
+  .ld-wheel-label {
+    font-size: 8px;
+  }
+
   .luckydraw-stats {
     grid-template-columns: 1fr;
     gap: 0;
@@ -552,5 +570,135 @@
 
   .ld-editor-actions button {
     flex: 1;
+  }
+}
+
+/* ==========================================
+   WINNER CONFETTI
+========================================== */
+
+.ld-confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ld-confetti-piece {
+  position: absolute;
+  top: -20px;
+  left: var(--x);
+
+  width: 9px;
+  height: 14px;
+
+  background: var(--color);
+  border-radius: 2px;
+
+  opacity: 0;
+
+  animation:
+    ld-confetti-fall
+    var(--duration)
+    var(--delay)
+    ease-out
+    forwards;
+}
+
+@keyframes ld-confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, -5vh, 0) rotate(0deg);
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate3d(var(--drift), 110vh, 0)
+      rotate(var(--rotation));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ld-confetti {
+    display: none;
+  }
+}
+
+/* ==========================================
+   LUCKY DRAW PRESENTATION MODE
+========================================== */
+
+body.ld-presentation-mode {
+  background: #0b0b16;
+  overflow-x: hidden;
+}
+
+/* Hide unrelated dashboard elements */
+body.ld-presentation-mode .topbar,
+body.ld-presentation-mode .site-footer,
+body.ld-presentation-mode .dashboard-heading,
+body.ld-presentation-mode .admin-nav,
+body.ld-presentation-mode #dashboardMessage {
+  display: none !important;
+}
+
+/* Hide the Lucky Draw section heading and statistics */
+body.ld-presentation-mode #luckydraw > .admin-section-heading,
+body.ld-presentation-mode #luckydraw > .luckydraw-stats {
+  display: none !important;
+}
+
+/* Hide participant management and history cards */
+body.ld-presentation-mode #luckydraw > .admin-card:not(.luckydraw-main) {
+  display: none !important;
+}
+
+/* Centre the Lucky Draw section */
+body.ld-presentation-mode #luckydraw {
+  width: 100%;
+  min-height: 100vh;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+/* Enlarge the main Lucky Draw card */
+body.ld-presentation-mode #luckydraw .luckydraw-main {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 64px);
+  box-sizing: border-box;
+}
+
+/* Make the wheel larger */
+body.ld-presentation-mode .luckydraw-wheel {
+  width: min(560px, 75vw);
+}
+
+/* Make the heading more prominent */
+body.ld-presentation-mode .luckydraw-heading h3 {
+  font-size: clamp(28px, 4vw, 44px);
+}
+
+/* Keep the presentation button visible */
+body.ld-presentation-mode #ldPresentationBtn {
+  display: inline-flex;
+}
+
+/* Improve spacing on smaller screens */
+@media (max-width: 700px) {
+  body.ld-presentation-mode #luckydraw {
+    padding: 12px;
+  }
+
+  body.ld-presentation-mode #luckydraw .luckydraw-main {
+    padding: 20px 12px;
+  }
+
+  body.ld-presentation-mode .luckydraw-wheel {
+    width: min(420px, 88vw);
   }
 }

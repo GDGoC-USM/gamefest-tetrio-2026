@@ -28,6 +28,7 @@ const $ = id => document.getElementById(id);
 const wheel = $("ldWheel");
 const spinBtn = $("ldSpinBtn");
 const refreshBtn = $("ldRefreshBtn");
+const presentationBtn = $("ldPresentationBtn");
 
 const participantsElement = $("ldParticipants");
 const ticketsElement = $("ldTickets");
@@ -65,6 +66,38 @@ let previousWinners = [];
 let isSpinning = false;
 let isAuthorized = false;
 let currentRotation = 0;
+
+// ==========================================
+// PRESENTATION MODE
+// ==========================================
+
+function setPresentationMode(enabled) {
+  document.body.classList.toggle(
+    "ld-presentation-mode",
+    enabled
+  );
+
+  if (presentationBtn) {
+    presentationBtn.setAttribute(
+      "aria-pressed",
+      String(enabled)
+    );
+
+    presentationBtn.textContent = enabled
+      ? "EXIT PRESENTATION MODE"
+      : "ENTER PRESENTATION MODE";
+  }
+}
+
+if (presentationBtn) {
+  presentationBtn.addEventListener("click", () => {
+    const isActive = document.body.classList.contains(
+      "ld-presentation-mode"
+    );
+
+    setPresentationMode(!isActive);
+  });
+}
 
 // ==========================================
 // MESSAGE
@@ -471,11 +504,12 @@ function renderEditor() {
   `).join("");
 }
 
-// ==========================================
-// RENDER PARTICIPANTS
-// ==========================================
 
-function renderParticipants() {
+ // ==========================================
+ // RENDER PARTICIPANTS
+ // ==========================================
+
+function renderParticipants({ preserveWheel = false } = {}) {
   const groups = getParticipantGroups();
 
   const totalTickets = currentEntries.length;
@@ -497,7 +531,10 @@ function renderParticipants() {
       </p>
     `;
 
-    renderWheel();
+    if (!preserveWheel) {
+      renderWheel();
+    }
+
     return;
   }
 
@@ -534,7 +571,9 @@ function renderParticipants() {
     `;
   }).join("");
 
-  renderWheel();
+  if (!preserveWheel) {
+    renderWheel();
+  }
 }
 
 // ==========================================
@@ -803,9 +842,11 @@ function renderWheel() {
     label.textContent = publicUsername(entry.displayName);
     label.title = label.textContent;
 
-    // Position each label along its ticket's radial line.
+    // Position each label proportionally to the wheel size.
+    const labelRadius = wheel.clientWidth * 0.34;
+
     label.style.transform =
-      `translate(-50%, -50%) rotate(${angle}deg) translateY(-108px) rotate(-90deg)`;
+      `translate(-50%, -50%) rotate(${angle}deg) translateY(-${labelRadius}px) rotate(-90deg)`;
 
     if (total > 30) {
       label.style.fontSize = "6px";
@@ -825,6 +866,78 @@ function renderWheel() {
   if (center) {
     center.style.zIndex = "2";
   }
+}
+
+// ==========================================
+// WINNER CONFETTI EFFECT
+// ==========================================
+
+function launchConfetti() {
+  // Respect reduced-motion accessibility settings.
+  if (window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches) {
+    return;
+  }
+
+  const colors = [
+    "#8a4bd8",
+    "#d94c70",
+    "#a66be8",
+    "#ffcc70",
+    "#ffffff",
+    "#c6a1ff"
+  ];
+
+  const confetti = document.createElement("div");
+  confetti.className = "ld-confetti";
+
+  const particleCount = 45;
+
+  for (let i = 0; i < particleCount; i++) {
+    const particle = document.createElement("span");
+
+    particle.className = "ld-confetti-piece";
+
+    particle.style.setProperty(
+      "--x",
+      `${Math.random() * 100}%`
+    );
+
+    particle.style.setProperty(
+      "--drift",
+      `${Math.random() * 300 - 150}px`
+    );
+
+    particle.style.setProperty(
+      "--rotation",
+      `${Math.random() * 1080}deg`
+    );
+
+    particle.style.setProperty(
+      "--duration",
+      `${2.2 + Math.random() * 1.2}s`
+    );
+
+    particle.style.setProperty(
+      "--delay",
+      `${Math.random() * 0.5}s`
+    );
+
+    particle.style.setProperty(
+      "--color",
+      colors[Math.floor(Math.random() * colors.length)]
+    );
+
+    confetti.appendChild(particle);
+  }
+
+  document.body.appendChild(confetti);
+
+  // Remove the effect after the animation.
+  setTimeout(() => {
+    confetti.remove();
+  }, 4000);
 }
 
 // ==========================================
@@ -852,6 +965,10 @@ async function spinWheel() {
   `;
 
   try {
+    // Rebuild the wheel using the latest eligible entries.
+    // This keeps the displayed segments aligned with the selection.
+    renderWheel();
+
     const total = currentEntries.length;
 
     // Randomly select one ticket.
@@ -864,21 +981,32 @@ async function spinWheel() {
     const winnerUid = winningEntry.uid;
     const winnerName = publicUsername(winningEntry.displayName);
 
+    // Calculate the centre of the winning segment.
     const segmentAngle = 360 / total;
     const winningCenter = (winningIndex + 0.5) * segmentAngle;
 
+    // Calculate the required final wheel orientation.
+    const targetAngle = (360 - winningCenter + 360) % 360;
+
+    // Normalise the wheel's current orientation.
+    const currentAngle = ((currentRotation % 360) + 360) % 360;
+
+    // Calculate the clockwise rotation needed to reach the winner.
+    const rotationDelta =
+      (targetAngle - currentAngle + 360) % 360;
+
+    // Add six complete rotations before reaching the winner.
     const extraSpins = 360 * 6;
 
     const targetRotation =
-      currentRotation +
-      extraSpins +
-      (360 - winningCenter);
+      currentRotation + extraSpins + rotationDelta;
 
     wheel.style.transform =
       `rotate(${targetRotation}deg)`;
 
     currentRotation = targetRotation;
 
+    // Wait for the wheel animation to finish.
     await new Promise(resolve => {
       setTimeout(resolve, 5200);
     });
@@ -942,9 +1070,9 @@ async function spinWheel() {
         }!
       </small>
     `;
+    launchConfetti();
 
-    renderParticipants();
-
+    renderParticipants({ preserveWheel: true });
     await loadHistory();
 
     message(
@@ -1395,6 +1523,7 @@ spinBtn.addEventListener("click", spinWheel);
 
 onAuthStateChanged(auth, async user => {
   isAuthorized = false;
+  setPresentationMode(false);
 
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
