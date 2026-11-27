@@ -13,7 +13,7 @@ import {
   escapeHTML
 } from "./shared.js";
 import { publicUsername } from "./usernames.js";
-import { createDrawStore, ticketCount } from "./lucky-draw-sync.js";
+import { createDrawStore, ticketCount } from "./lucky-draw-sync.js?v=60bf4d6";
 import {
   createManualParticipantId,
   manualDisplayName,
@@ -61,6 +61,8 @@ const newNameInput = $("ldNewName");
 const newTicketsInput = $("ldNewTickets");
 const editorList = $("ldEditorList");
 const editorCount = $("ldEditorCount");
+const removedList = $("ldRemovedList");
+const removedCount = $("ldRemovedCount");
 const resetEditsBtn = $("ldResetEditsBtn");
 
 // Bulk import elements.
@@ -247,8 +249,11 @@ async function loadSavedDraw() {
     drawVersion = data.version || null;
     loadDrawSettings(data);
     leaderboardParticipants = leaderboardSnapshot.docs.map(item => ({ ...item.data(), uid: item.id }));
+    const hiddenUids = new Set([...excludedUids, ...removedUids]);
     currentEntries = Array.isArray(data.entries)
-      ? data.entries.map(entry => ({ ...entry, displayName: entryDisplayName(entry) }))
+      ? data.entries
+        .filter(entry => !hiddenUids.has(entry.uid))
+        .map(entry => ({ ...entry, displayName: entryDisplayName(entry) }))
       : [];
     winnerElement.innerHTML = data.lastWinner
       ? `<span>LAST WINNER</span><strong>${escapeHTML(entryDisplayName(data.lastWinner))}</strong>`
@@ -271,8 +276,8 @@ async function loadSavedDraw() {
 // REFRESH FROM LATEST LEADERBOARD
 // ==========================================
 
-async function refreshTickets() {
-  if (!isAuthorized || isSpinning) return;
+async function refreshTickets({ allowDuringOperation = false } = {}) {
+  if (!isAuthorized || (isSpinning && !allowDuringOperation)) return false;
   clearBulkPreview();
   isSpinning = true;
   spinBtn.disabled = true;
@@ -362,7 +367,10 @@ function getEditorParticipants() {
     });
 
   const manualPeople = manualParticipants
-    .filter(person => !excludedUids.includes(`manual:${person.id}`))
+    .filter(person => {
+      const uid = `manual:${person.id}`;
+      return !excludedUids.includes(uid) && !removedUids.includes(uid);
+    })
     .map(person => ({
       uid: `manual:${person.id}`,
       displayName: manualDisplayName(person.displayName),
@@ -370,6 +378,113 @@ function getEditorParticipants() {
     }));
 
   return [...leaderboardPeople, ...manualPeople];
+}
+
+// Resolve a persisted participant key to its current lottery source. A
+// leaderboard removal must keep using the authoritative ticket count, while a
+// manual participant keeps the administrator-configured count and name.
+function currentParticipant(uid) {
+  if (String(uid).startsWith("manual:")) {
+    const manualId = uid.substring("manual:".length);
+    const person = manualParticipants.find(item => item.id === manualId);
+
+    return person
+      ? {
+        uid,
+        displayName: manualDisplayName(person.displayName),
+        tickets: Math.max(0, Math.floor(Number(person.tickets) || 0)),
+        kind: "manual"
+      }
+      : null;
+  }
+
+  const person = leaderboardParticipants.find(item => item.uid === uid);
+
+  if (!person) return null;
+
+  return {
+    uid,
+    displayName: Object.prototype.hasOwnProperty.call(nameOverrides, uid)
+      ? publicUsername(nameOverrides[uid])
+      : publicUsername(person.displayName),
+    tickets: ticketCount(person.correct),
+    kind: "leaderboard"
+  };
+}
+
+function participantIdentity(uid) {
+  return String(uid).startsWith("manual:")
+    ? `Manual ID ${uid.substring("manual:".length)}`
+    : `UID ${uid}`;
+}
+
+function getRemovedParticipants() {
+  return [...new Set(removedUids)]
+    .filter(uid => !excludedUids.includes(uid))
+    .map(uid => {
+      const person = currentParticipant(uid);
+
+      if (person) return person;
+
+      // Keep stale exclusions visible so a maintainer can clear them, even if
+      // participant cleanup already removed the underlying leaderboard row.
+      return {
+        uid,
+        displayName: Object.prototype.hasOwnProperty.call(nameOverrides, uid)
+          ? publicUsername(nameOverrides[uid])
+          : "Participant",
+        tickets: 0,
+        kind: String(uid).startsWith("manual:") ? "manual" : "leaderboard",
+        unavailable: true
+      };
+    });
+}
+
+function renderRemovedParticipants() {
+  if (!removedList) return;
+
+  const people = getRemovedParticipants();
+
+  if (removedCount) {
+    removedCount.textContent = people.length;
+  }
+
+  if (!people.length) {
+    removedList.innerHTML = `
+      <p class="muted">
+        No removed participants. Remove someone from Edit Entries to exclude
+        all of their tickets.
+      </p>
+    `;
+    return;
+  }
+
+  removedList.innerHTML = people.map(person => {
+    const plural = person.tickets === 1 ? "entry" : "entries";
+    const identity = escapeHTML(participantIdentity(person.uid));
+    const status = person.unavailable
+      ? `${identity} · no current ticket source`
+      : `${identity} · ${person.tickets} ${plural}`;
+
+    return `
+      <div class="ld-removed-row" data-removed-uid="${escapeHTML(person.uid)}">
+
+        <div class="ld-removed-info">
+          <strong>${escapeHTML(person.displayName)}</strong>
+          <span>${status}</span>
+        </div>
+
+        <button
+          type="button"
+          class="btn secondary ld-restore-btn"
+          data-restore-participant
+        >
+          RESTORE
+        </button>
+
+      </div>
+    `;
+  }).join("");
 }
 
 function renderEditor() {
@@ -417,6 +532,10 @@ function renderEditor() {
           >
         </label>
 
+        <span class="ld-editor-id">
+          ${escapeHTML(participantIdentity(person.uid))}
+        </span>
+
       </div>
 
       <div class="ld-editor-actions">
@@ -459,6 +578,7 @@ function renderParticipants({ preserveWheel = false } = {}) {
     isSpinning || totalTickets === 0;
 
   renderEditor();
+  renderRemovedParticipants();
 
   if (!groups.length) {
     participantsList.innerHTML = `
@@ -594,21 +714,22 @@ async function removeParticipant(uid) {
 
   if (!person) return;
 
+  const ticketText = `${person.tickets} ${
+    person.tickets === 1 ? "entry" : "entries"
+  }`;
+
   const confirmed = confirm(
-    `Remove ${person.displayName} from this Lucky Draw?\n\n` +
-    `Their leaderboard record will not be deleted.`
+    `Remove ${person.displayName} (${participantIdentity(uid)}) from this Lucky Draw?\n\n` +
+    `All ${ticketText} will be excluded. Their leaderboard score, predictions ` +
+    `and account are not changed. You can restore them later.`
   );
 
   if (!confirmed) return;
 
-  if (uid.startsWith("manual:")) {
-    const manualId = uid.substring("manual:".length);
+  const previousRemoved = [...removedUids];
+  const previousEntries = currentEntries;
 
-    manualParticipants = manualParticipants.filter(
-      person => person.id !== manualId
-    );
-
-  } else if (!removedUids.includes(uid)) {
+  if (!removedUids.includes(uid)) {
     removedUids.push(uid);
   }
 
@@ -616,12 +737,75 @@ async function removeParticipant(uid) {
     entry => entry.uid !== uid
   );
 
-  await saveDrawSettings();
+  try {
+    await saveDrawSettings();
+  } catch (error) {
+    removedUids = previousRemoved;
+    currentEntries = previousEntries;
+    throw error;
+  }
 
   renderParticipants();
 
   message(
-    `${person.displayName} has been removed from the Lucky Draw.`,
+    `${person.displayName} has been removed. ${ticketText} excluded; ` +
+    `restore them from Removed Participants if needed.`,
+    "success"
+  );
+}
+
+// ==========================================
+// RESTORE REMOVED PARTICIPANT
+// ==========================================
+
+async function restoreParticipant(uid) {
+  if (!uid) return;
+
+  const person = getRemovedParticipants().find(
+    item => item.uid === uid
+  );
+
+  if (!person) return;
+
+  const confirmed = confirm(
+    `Restore ${person.displayName} (${participantIdentity(uid)}) to this Lucky Draw?\n\n` +
+    `Their current ticket eligibility will be recalculated from the ` +
+    `leaderboard or manual participant settings.`
+  );
+
+  if (!confirmed) return;
+
+  const previousRemoved = [...removedUids];
+
+  removedUids = removedUids.filter(item => item !== uid);
+
+  try {
+    await saveDrawSettings();
+  } catch (error) {
+    removedUids = previousRemoved;
+    throw error;
+  }
+
+  // Saving invalidates the certified pool. Refresh now so restored tickets
+  // use the current leaderboard counts instead of a stale snapshot.
+  const refreshed = await refreshTickets({ allowDuringOperation: true });
+
+  if (!refreshed) return;
+
+  const restored = currentParticipant(uid);
+
+  if (!restored) {
+    message(
+      `${participantIdentity(uid)} was restored, but no current ticket source was found.`,
+      "info"
+    );
+    return;
+  }
+
+  message(
+    `${restored.displayName} has been restored with ${restored.tickets} ${
+      restored.tickets === 1 ? "entry" : "entries"
+    }.`,
     "success"
   );
 }
@@ -879,7 +1063,7 @@ async function resetEdits() {
     "- Remove custom name changes\n" +
     "- Restore original leaderboard ticket quantities\n" +
     "- Remove manually added participants\n" +
-    "- Restore manually removed leaderboard participants\n\n" +
+    "- Restore removed participants\n\n" +
     "Previous winners and winner history will remain unchanged."
   );
 
@@ -1376,14 +1560,59 @@ if (editorList) {
         console.error("Remove participant error:", error);
 
         message(
-          `Unable to remove participant: ${error.message}`,
+          `Unable to remove participant: ${error.message} ` +
+          `The draw will be reloaded; refresh entries before retrying.`,
           "error"
         );
+
+        isSpinning = false;
+        await loadSavedDraw();
 
       } finally {
         isSpinning = false;
         removeButton.disabled = false;
       }
+    }
+  });
+}
+
+// ==========================================
+// REMOVED PARTICIPANT RESTORE EVENTS
+// ==========================================
+
+if (removedList) {
+  removedList.addEventListener("click", async event => {
+    if (!isAuthorized || isSpinning) return;
+
+    const restoreButton = event.target.closest("[data-restore-participant]");
+    const row = event.target.closest("[data-removed-uid]");
+
+    if (!restoreButton || !row) return;
+
+    const uid = row.dataset.removedUid;
+
+    if (!uid) return;
+
+    try {
+      isSpinning = true;
+      restoreButton.disabled = true;
+      await restoreParticipant(uid);
+
+    } catch (error) {
+      console.error("Restore participant error:", error);
+
+      message(
+        `Unable to restore participant: ${error.message} ` +
+        `The draw will be reloaded; refresh entries before retrying.`,
+        "error"
+      );
+
+      isSpinning = false;
+      await loadSavedDraw();
+
+    } finally {
+      isSpinning = false;
+      restoreButton.disabled = false;
     }
   });
 }
@@ -1462,7 +1691,7 @@ if (resetEditsBtn) {
 // BUTTON EVENTS
 // ==========================================
 
-refreshBtn.addEventListener("click", refreshTickets);
+refreshBtn.addEventListener("click", () => refreshTickets());
 spinBtn.addEventListener("click", spinWheel);
 
 // Keep radial labels centred in their segments when the viewport or

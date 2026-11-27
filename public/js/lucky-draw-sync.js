@@ -123,12 +123,17 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
     return { draw, rows };
   }
 
-  async function save(expected, settings) {
+  async function save(expected, settings = {}) {
     return runTransaction(db, async transaction => {
       const snapshot = await transaction.get(drawRef);
       const current = snapshot.exists() ? snapshot.data() : {};
       checkVersion(current, expected);
-      const updated = { ...current, ...settings, leaderboardVersion: null,
+      // Removal must take effect immediately, even before the next certified
+      // refresh. Keeping removed tickets in the persisted pool would let them
+      // reappear on reload and would leave stale selections available.
+      const removed = new Set([...list(current.removedUids), ...list(settings.removedUids)]);
+      const entries = list(current.entries).filter(entry => !removed.has(entry.uid));
+      const updated = { ...current, ...settings, entries, leaderboardVersion: null,
         version: newVersion(), updatedAt: serverTimestamp() };
       transaction.set(drawRef, updated);
       return updated;
@@ -149,8 +154,8 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
         throw new Error('Tickets are outdated. Refresh Latest Entries before spinning.');
       }
       const entries = list(current.entries);
-      const exclusions = list(current.excludedUids);
-      if (!entries.length || entries.some(entry => !entry.uid || exclusions.includes(entry.uid))) {
+      const exclusions = new Set([...list(current.excludedUids), ...list(current.removedUids)]);
+      if (!entries.length || entries.some(entry => !entry.uid || exclusions.has(entry.uid))) {
         throw new Error('No valid eligible tickets. Refresh Latest Entries before spinning.');
       }
       const winningIndex = Math.floor(random * entries.length);
@@ -159,7 +164,7 @@ export function createDrawStore({ db, doc, collection, getDoc, getDocs, runTrans
         ticketsAtWin: entries.filter(entry => entry.uid === selected.uid).length,
         drawnAt: serverTimestamp() };
       const updated = { ...current, entries: entries.filter(entry => entry.uid !== selected.uid),
-        excludedUids: [...exclusions, selected.uid], lastWinner: winner,
+        excludedUids: [...list(current.excludedUids), selected.uid], lastWinner: winner,
         lastWinnerHistoryId: historyRef.id, version: newVersion(), updatedAt: serverTimestamp() };
       transaction.set(historyRef, { type: 'winner', ...winner });
       transaction.set(drawRef, updated);
