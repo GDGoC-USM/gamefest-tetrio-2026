@@ -5,15 +5,20 @@ import {
   onAuthStateChanged,
   collection,
   doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  addDoc,
-  deleteDoc,
+  getDocFromServer as getDoc,
+  getDocsFromServer as getDocs,
+  runTransaction,
   serverTimestamp,
   escapeHTML
 } from "./shared.js";
 import { publicUsername } from "./usernames.js";
+import { createDrawStore } from "./lucky-draw-sync.js";
+import {
+  createManualParticipantId,
+  manualDisplayName,
+  normalizeParticipantName,
+  parseBulkParticipants
+} from "./lucky-draw-import.js";
 
 // ==========================================
 // LUCKY DRAW CONFIGURATION
@@ -22,6 +27,8 @@ import { publicUsername } from "./usernames.js";
 const DRAW_REF = doc(db, "ticketAwards", "currentDraw");
 const AWARDS_REF = collection(db, "ticketAwards");
 const LEADERBOARD_REF = collection(db, "leaderboard");
+const drawStore = createDrawStore({ db, doc, collection, getDoc, getDocs, runTransaction, serverTimestamp });
+let drawVersion = null;
 
 const $ = id => document.getElementById(id);
 
@@ -47,6 +54,14 @@ const editorList = $("ldEditorList");
 const editorCount = $("ldEditorCount");
 const resetEditsBtn = $("ldResetEditsBtn");
 
+// Bulk import elements.
+const bulkNamesInput = $("ldBulkNames");
+const bulkPreviewBtn = $("ldBulkPreviewBtn");
+const bulkPreview = $("ldBulkPreview");
+const bulkSummary = $("ldBulkSummary");
+const bulkPreviewList = $("ldBulkPreviewList");
+const bulkImportBtn = $("ldBulkImportBtn");
+
 // ==========================================
 // DRAW STATE
 // ==========================================
@@ -66,6 +81,9 @@ let previousWinners = [];
 let isSpinning = false;
 let isAuthorized = false;
 let currentRotation = 0;
+let bulkPreviewState = null;
+let bulkPreviewText = "";
+let bulkPreviewExistingSignature = "";
 
 // ==========================================
 // PRESENTATION MODE
@@ -108,6 +126,14 @@ function message(text, type = "info") {
 
   messageElement.textContent = text;
   messageElement.className = `notice ${type}`;
+}
+
+// Manual entries are administrator-entered text, not profile names. Keep their
+// spelling and case, and render them only through textContent/escapeHTML.
+function entryDisplayName(entry) {
+  return String(entry?.uid || "").startsWith("manual:")
+    ? manualDisplayName(entry.displayName)
+    : publicUsername(entry.displayName);
 }
 
 // ==========================================
@@ -162,21 +188,18 @@ function loadDrawSettings(data = {}) {
 // SAVE DRAW SETTINGS
 // ==========================================
 
-async function saveDrawSettings(extraData = {}) {
-  await setDoc(DRAW_REF, {
-
-    entries: currentEntries,
-    excludedUids,
-    removedUids,
-    nameOverrides,
-    ticketOverrides,
-    manualParticipants,
-
-    updatedAt: serverTimestamp(),
-
-    ...extraData
-
-  }, { merge: true });
+async function saveDrawSettings() {
+  try {
+    const saved = await drawStore.save(drawVersion, {
+      removedUids, nameOverrides, ticketOverrides, manualParticipants
+    });
+    drawVersion = saved.version;
+  } catch (error) {
+    drawVersion = null;
+    currentEntries = [];
+    renderParticipants();
+    throw error;
+  }
 }
 
 // ==========================================
@@ -184,97 +207,43 @@ async function saveDrawSettings(extraData = {}) {
 // ==========================================
 
 async function loadSavedDraw() {
-  const [snapshot, leaderboardSnapshot] = await Promise.all([
-    getDoc(DRAW_REF),
-    getDocs(LEADERBOARD_REF)
-  ]);
-
-  if (!snapshot.exists()) {
-    await refreshTickets();
-    return;
-  }
-
-  const data = snapshot.data();
-
-  loadDrawSettings(data);
-
-  leaderboardParticipants = leaderboardSnapshot.docs.map(item => ({
-    uid: item.id,
-    ...item.data()
-  }));
-
-  currentEntries = Array.isArray(data.entries)
-    ? data.entries.map(entry => ({
-        ...entry,
-        displayName: publicUsername(entry.displayName)
-      }))
-    : [];
-
-  if (data.lastWinner) {
-    winnerElement.innerHTML = `
-      <span>LAST WINNER</span>
-      <strong>
-        ${escapeHTML(publicUsername(data.lastWinner.displayName))}
-      </strong>
-    `;
-  } else {
-    winnerElement.innerHTML = `
-      <span>WAITING FOR THE DRAW</span>
-      <strong>GOOD LUCK!</strong>
-    `;
-  }
-
-  renderParticipants();
-  await loadHistory();
-}
-
-// ==========================================
-// BUILD LEADERBOARD ENTRIES
-// ==========================================
-
-function buildLeaderboardEntries(leaderboard) {
-  const entries = [];
-
-  leaderboard.forEach(person => {
-    const uid = person.uid;
-
-    // Do not include previous winners.
-    if (excludedUids.includes(uid)) return;
-
-    // Do not include manually removed participants.
-    if (removedUids.includes(uid)) return;
-
-    const originalTickets = Math.max(
-      0,
-      Math.floor(Number(person.correct) || 0)
-    );
-
-    const tickets = Object.prototype.hasOwnProperty.call(
-      ticketOverrides,
-      uid
-    )
-      ? Math.max(0, Math.floor(Number(ticketOverrides[uid]) || 0))
-      : originalTickets;
-
-    const originalName = publicUsername(person.displayName);
-
-    const displayName = Object.prototype.hasOwnProperty.call(
-      nameOverrides,
-      uid
-    )
-      ? publicUsername(nameOverrides[uid])
-      : originalName;
-
-    // One separate wheel entry for every ticket.
-    for (let i = 0; i < tickets; i++) {
-      entries.push({
-        uid,
-        displayName
-      });
+  if (!isAuthorized || isSpinning) return;
+  clearBulkPreview();
+  isSpinning = true;
+  spinBtn.disabled = true;
+  refreshBtn.disabled = true;
+  try {
+    const [snapshot, leaderboardSnapshot] = await Promise.all([
+      getDoc(DRAW_REF), getDocs(LEADERBOARD_REF)
+    ]);
+    if (!isAuthorized) return;
+    if (!snapshot.exists()) {
+      isSpinning = false;
+      await refreshTickets();
+      return;
     }
-  });
-
-  return entries;
+    const data = snapshot.data();
+    drawVersion = data.version || null;
+    loadDrawSettings(data);
+    leaderboardParticipants = leaderboardSnapshot.docs.map(item => ({ ...item.data(), uid: item.id }));
+    currentEntries = Array.isArray(data.entries)
+      ? data.entries.map(entry => ({ ...entry, displayName: entryDisplayName(entry) }))
+      : [];
+    winnerElement.innerHTML = data.lastWinner
+      ? `<span>LAST WINNER</span><strong>${escapeHTML(publicUsername(data.lastWinner.displayName))}</strong>`
+      : `<span>WAITING FOR THE DRAW</span><strong>GOOD LUCK!</strong>`;
+    renderParticipants();
+    await loadHistory();
+  } catch (error) {
+    drawVersion = null;
+    currentEntries = [];
+    renderParticipants();
+    message(`Unable to load the draw. Refresh before retrying: ${error.message}`, "error");
+  } finally {
+    isSpinning = false;
+    refreshBtn.disabled = !isAuthorized;
+    spinBtn.disabled = !isAuthorized || currentEntries.length === 0;
+  }
 }
 
 // ==========================================
@@ -283,85 +252,30 @@ function buildLeaderboardEntries(leaderboard) {
 
 async function refreshTickets() {
   if (!isAuthorized || isSpinning) return;
-
+  clearBulkPreview();
+  isSpinning = true;
+  spinBtn.disabled = true;
   refreshBtn.disabled = true;
-
-  message("Loading latest leaderboard entries...");
-
+  message("Validating prediction awards and manual tickets...");
   try {
-    const [leaderboardSnapshot, drawSnapshot] =
-      await Promise.all([
-        getDocs(LEADERBOARD_REF),
-        getDoc(DRAW_REF)
-      ]);
-
-    // Load existing custom settings before rebuilding entries.
-    if (drawSnapshot.exists()) {
-      loadDrawSettings(drawSnapshot.data());
-    }
-
-    const leaderboard = leaderboardSnapshot.docs.map(item => ({
-      uid: item.id,
-      ...item.data()
-    }));
-
-    leaderboardParticipants = [...leaderboard];
-
-    // Sort according to latest leaderboard points.
-    leaderboard.sort((a, b) =>
-      (Number(b.points) || 0) -
-      (Number(a.points) || 0)
-    );
-
-    // Rebuild leaderboard entries while preserving custom edits.
-    const entries = buildLeaderboardEntries(leaderboard);
-
-    // Add manually created participants.
-    manualParticipants.forEach(person => {
-      const uid = `manual:${person.id}`;
-
-      if (excludedUids.includes(uid)) return;
-
-      const tickets = Math.max(
-        0,
-        Math.floor(Number(person.tickets) || 0)
-      );
-
-      const displayName = publicUsername(person.displayName);
-
-      for (let i = 0; i < tickets; i++) {
-        entries.push({
-          uid,
-          displayName
-        });
-      }
-    });
-
-    currentEntries = entries;
-
-    await saveDrawSettings();
-
+    const { draw, rows } = await drawStore.refresh();
+    loadDrawSettings(draw);
+    drawVersion = draw.version;
+    leaderboardParticipants = rows;
+    currentEntries = draw.entries;
     renderParticipants();
-
     await loadHistory();
-
-    message(
-      `Successfully loaded ${currentEntries.length} ${
-        currentEntries.length === 1 ? "entry" : "entries"
-      }. Your saved edits have been preserved.`,
-      "success"
-    );
-
+    message(`Validated ${currentEntries.length} entries from prediction awards and manual tickets. Previous winners remain excluded.`, "success");
+    return true;
   } catch (error) {
-    console.error("Lucky Draw refresh error:", error);
-
-    message(
-      `Unable to load entries: ${error.message}`,
-      "error"
-    );
-
+    currentEntries = [];
+    renderParticipants();
+    message(`Unable to validate entries: ${error.message}`, "error");
+    return false;
   } finally {
-    refreshBtn.disabled = false;
+    isSpinning = false;
+    refreshBtn.disabled = !isAuthorized;
+    spinBtn.disabled = !isAuthorized || currentEntries.length === 0;
   }
 }
 
@@ -376,7 +290,7 @@ function getParticipantGroups() {
     if (!groups.has(entry.uid)) {
       groups.set(entry.uid, {
         uid: entry.uid,
-        displayName: publicUsername(entry.displayName),
+        displayName: entryDisplayName(entry),
         tickets: 0
       });
     }
@@ -428,7 +342,7 @@ function getEditorParticipants() {
     .filter(person => !excludedUids.includes(`manual:${person.id}`))
     .map(person => ({
       uid: `manual:${person.id}`,
-      displayName: publicUsername(person.displayName),
+      displayName: manualDisplayName(person.displayName),
       tickets: Math.max(0, Math.floor(Number(person.tickets) || 0))
     }));
 
@@ -610,7 +524,9 @@ async function updateParticipant(uid, displayName, tickets) {
     Math.min(10000, Math.floor(Number(tickets) || 0))
   );
 
-  const safeName = publicUsername(cleanName);
+  const safeName = uid.startsWith("manual:")
+    ? manualDisplayName(cleanName)
+    : publicUsername(cleanName);
 
   if (uid.startsWith("manual:")) {
     const manualId = uid.substring("manual:".length);
@@ -691,10 +607,10 @@ async function removeParticipant(uid) {
 // ADD MANUAL PARTICIPANT
 // ==========================================
 
-async function addManualParticipant(event) {
+async function addManualParticipant(event, operationStarted = false) {
   event.preventDefault();
 
-  if (!isAuthorized || isSpinning) return;
+  if (!isAuthorized || (isSpinning && !operationStarted)) return;
 
   const displayName = String(newNameInput?.value || "").trim();
 
@@ -708,13 +624,13 @@ async function addManualParticipant(event) {
     return;
   }
 
-  const id = `manual-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+  const id = createManualParticipantId(
+    manualParticipants.map(person => person.id)
+  );
 
   const participant = {
     id,
-    displayName: publicUsername(displayName),
+    displayName: manualDisplayName(displayName),
     tickets
   };
 
@@ -748,6 +664,186 @@ async function addManualParticipant(event) {
 }
 
 // ==========================================
+// BULK MANUAL IMPORT
+// ==========================================
+
+function bulkExistingSignature() {
+  return getEditorParticipants()
+    .map(person => normalizeParticipantName(person.displayName))
+    .sort()
+    .join("\n");
+}
+
+function clearBulkPreview() {
+  bulkPreviewState = null;
+  bulkPreviewText = "";
+  bulkPreviewExistingSignature = "";
+
+  if (bulkPreview) bulkPreview.hidden = true;
+  if (bulkPreviewList) bulkPreviewList.replaceChildren();
+
+  if (bulkSummary) {
+    bulkSummary.textContent = "";
+    bulkSummary.className = "ld-bulk-summary";
+  }
+
+  if (bulkImportBtn) {
+    bulkImportBtn.disabled = true;
+    bulkImportBtn.textContent = "IMPORT PARTICIPANTS";
+  }
+}
+
+function renderBulkPreview(result) {
+  if (!bulkPreview) return;
+
+  bulkPreview.hidden = false;
+  const plural = result.total === 1 ? "" : "s";
+
+  if (!result.entries.length) {
+    if (bulkSummary) {
+      bulkSummary.textContent = result.errors[0] || "No names to preview.";
+      bulkSummary.className = "ld-bulk-summary ld-bulk-error";
+    }
+    if (bulkPreviewList) bulkPreviewList.replaceChildren();
+  } else {
+    const errorCount = result.errors.length;
+    const warning = result.duplicateCount === 1
+      ? "1 duplicate warning"
+      : `${result.duplicateCount} duplicate warnings`;
+    const errorNote = errorCount
+      ? ` · ${errorCount} name${errorCount === 1 ? "" : "s"} too long`
+      : "";
+
+    if (bulkSummary) {
+      bulkSummary.textContent =
+        `${result.total} participant${plural} · ${warning}${errorNote}`;
+      bulkSummary.className = errorCount
+        ? "ld-bulk-summary ld-bulk-error"
+        : "ld-bulk-summary";
+    }
+
+    const rows = result.entries.map(entry => {
+      const row = document.createElement("div");
+      row.className = "ld-bulk-row";
+
+      if (entry.duplicate) row.classList.add("ld-bulk-duplicate");
+      if (entry.error) row.classList.add("ld-bulk-invalid");
+
+      const name = document.createElement("span");
+      name.className = "ld-bulk-name";
+      name.textContent = entry.name;
+
+      const meta = document.createElement("span");
+      meta.className = "ld-bulk-meta";
+
+      if (entry.error) {
+        meta.textContent = entry.error;
+      } else if (entry.duplicate) {
+        const reasons = [];
+        if (entry.duplicateInPaste) reasons.push("duplicate in list");
+        if (entry.duplicateExisting) reasons.push("already in wheel");
+        meta.textContent = reasons.join(" · ");
+      }
+
+      row.append(name, meta);
+      return row;
+    });
+
+    if (bulkPreviewList) bulkPreviewList.replaceChildren(...rows);
+  }
+
+  if (bulkImportBtn) {
+    bulkImportBtn.disabled = !result.canImport;
+    bulkImportBtn.textContent = result.canImport
+      ? `IMPORT ${result.total} PARTICIPANT${plural.toUpperCase()}`
+      : "FIX VALIDATION ERRORS";
+  }
+}
+
+function previewBulkImport() {
+  if (!isAuthorized || isSpinning || !bulkNamesInput) return;
+
+  const text = bulkNamesInput.value;
+  const result = parseBulkParticipants(
+    text,
+    getEditorParticipants().map(person => person.displayName)
+  );
+
+  bulkPreviewState = result;
+  bulkPreviewText = text;
+  bulkPreviewExistingSignature = bulkExistingSignature();
+
+  renderBulkPreview(result);
+}
+
+async function importBulkPreview(operationStarted = false) {
+  if (!isAuthorized || (isSpinning && !operationStarted)) return;
+  if (!bulkPreviewState?.canImport) return;
+
+  if ((bulkNamesInput?.value || "") !== bulkPreviewText) {
+    clearBulkPreview();
+    message("The participant list changed after preview. Preview it again before importing.", "error");
+    return;
+  }
+
+  if (bulkPreviewExistingSignature !== bulkExistingSignature()) {
+    clearBulkPreview();
+    message("Participant names changed after preview. Preview the list again before importing.", "error");
+    return;
+  }
+
+  const imported = [];
+  const usedIds = new Set(manualParticipants.map(person => person.id));
+
+  for (const entry of bulkPreviewState.entries) {
+    const id = createManualParticipantId(usedIds);
+    usedIds.add(id);
+    imported.push({ id, displayName: entry.name, tickets: 1 });
+  }
+
+  const previousParticipants = manualParticipants;
+  const previousEntries = currentEntries;
+
+  manualParticipants = [...manualParticipants, ...imported];
+  currentEntries = [
+    ...currentEntries,
+    ...imported.map(person => ({
+      uid: `manual:${person.id}`,
+      displayName: person.displayName
+    }))
+  ];
+
+  try {
+    // One transaction persists every imported participant and invalidates the
+    // certified ticket pool with the existing draw-version fence.
+    await saveDrawSettings();
+  } catch (error) {
+    manualParticipants = previousParticipants;
+    currentEntries = previousEntries;
+    renderParticipants();
+    throw error;
+  }
+
+  const duplicateCount = bulkPreviewState.duplicateCount;
+  const totalPeople = getEditorParticipants().length;
+
+  clearBulkPreview();
+
+  if (bulkNamesInput) {
+    bulkNamesInput.value = "";
+  }
+
+  renderParticipants();
+
+  message(
+    `Imported ${imported.length} participant${imported.length === 1 ? "" : "s"}` +
+    `${duplicateCount ? ` with ${duplicateCount} duplicate warning${duplicateCount === 1 ? "" : "s"}` : ""}. ` +
+    `Duplicates remain separate participants. The wheel now lists ${totalPeople} participants.`,
+    "success"
+  );
+}
+
+// ==========================================
 // RESET CUSTOM EDITS
 // ==========================================
 
@@ -767,6 +863,7 @@ async function resetEdits() {
   if (!confirmed) return;
 
   try {
+    isSpinning = true;
     nameOverrides = {};
     ticketOverrides = {};
     manualParticipants = [];
@@ -774,7 +871,8 @@ async function resetEdits() {
 
     await saveDrawSettings();
 
-    await refreshTickets();
+    isSpinning = false;
+    if (!await refreshTickets()) return;
 
     message(
       "Lucky Draw edits have been reset to the latest leaderboard data.",
@@ -788,6 +886,8 @@ async function resetEdits() {
       `Unable to reset edits: ${error.message}`,
       "error"
     );
+  } finally {
+    isSpinning = false;
   }
 }
 
@@ -839,7 +939,7 @@ function renderWheel() {
     const label = document.createElement("span");
 
     label.className = "ld-wheel-label";
-    label.textContent = publicUsername(entry.displayName);
+    label.textContent = entryDisplayName(entry);
     label.title = label.textContent;
 
     // Position each label proportionally to the wheel size.
@@ -940,6 +1040,7 @@ function launchConfetti() {
   }, 4000);
 }
 
+
 // ==========================================
 // SPIN WHEEL
 // ==========================================
@@ -947,154 +1048,96 @@ function launchConfetti() {
 async function spinWheel() {
   if (!isAuthorized || isSpinning) return;
 
-  if (!currentEntries.length) {
-    message("There are no eligible entries.", "error");
-    return;
-  }
-
   isSpinning = true;
-
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
 
-  message("The wheel is spinning...");
+  message("Validating tickets and saving the winner...");
 
-  winnerElement.innerHTML = `
-    <span>GOOD LUCK!</span>
-    <strong>SPINNING...</strong>
-  `;
+  let committed = false;
 
   try {
-    // Rebuild the wheel using the latest eligible entries.
-    // This keeps the displayed segments aligned with the selection.
+    // Use the transaction-based draw store to select and save the winner.
+    const result = await drawStore.spin(drawVersion);
+    committed = true;
+
+    const { entries, winningIndex, winner, draw } = result;
+    const winnerName = entryDisplayName(winner);
+
+    currentEntries = entries;
     renderWheel();
 
-    const total = currentEntries.length;
+    winnerElement.innerHTML = `
+      <span>GOOD LUCK!</span>
+      <strong>SPINNING...</strong>
+    `;
 
-    // Randomly select one ticket.
-    const winningIndex = Math.floor(
-      Math.random() * total
-    );
+    // Calculate the exact position of the winning wheel segment.
+    const winningCenter =
+      (winningIndex + 0.5) * (360 / entries.length);
 
-    const winningEntry = currentEntries[winningIndex];
+    const normalizedRotation =
+      ((currentRotation % 360) + 360) % 360;
 
-    const winnerUid = winningEntry.uid;
-    const winnerName = publicUsername(winningEntry.displayName);
+    const offset =
+      ((360 - winningCenter - normalizedRotation) % 360 + 360) % 360;
 
-    // Calculate the centre of the winning segment.
-    const segmentAngle = 360 / total;
-    const winningCenter = (winningIndex + 0.5) * segmentAngle;
+    // Rotate the wheel through six full rotations before stopping.
+    currentRotation += 360 * 6 + offset;
 
-    // Calculate the required final wheel orientation.
-    const targetAngle = (360 - winningCenter + 360) % 360;
+    wheel.style.transform = `rotate(${currentRotation}deg)`;
 
-    // Normalise the wheel's current orientation.
-    const currentAngle = ((currentRotation % 360) + 360) % 360;
-
-    // Calculate the clockwise rotation needed to reach the winner.
-    const rotationDelta =
-      (targetAngle - currentAngle + 360) % 360;
-
-    // Add six complete rotations before reaching the winner.
-    const extraSpins = 360 * 6;
-
-    const targetRotation =
-      currentRotation + extraSpins + rotationDelta;
-
-    wheel.style.transform =
-      `rotate(${targetRotation}deg)`;
-
-    currentRotation = targetRotation;
-
-    // Wait for the wheel animation to finish.
     await new Promise(resolve => {
       setTimeout(resolve, 5200);
     });
 
-    const winnerTicketCount = currentEntries.filter(
-      entry => entry.uid === winnerUid
-    ).length;
+    // Update the saved draw information.
+    loadDrawSettings(draw);
+    drawVersion = draw.version;
+    currentEntries = draw.entries;
 
-    // Remove all tickets belonging to the winner.
-    currentEntries = currentEntries.filter(
-      entry => entry.uid !== winnerUid
-    );
-
-    if (!excludedUids.includes(winnerUid)) {
-      excludedUids.push(winnerUid);
-    }
-
-    const winnerData = {
-      uid: winnerUid,
-      displayName: winnerName,
-      ticketsAtWin: winnerTicketCount,
-      drawnAt: new Date().toISOString()
-    };
-
-    await saveDrawSettings({
-      lastWinner: winnerData,
-      lastWinnerHistoryId: null
-    });
-
-    // Save winner history.
-    try {
-      const historyRef = await addDoc(AWARDS_REF, {
-        type: "winner",
-        uid: winnerUid,
-        displayName: winnerName,
-        ticketsAtWin: winnerTicketCount,
-        drawnAt: serverTimestamp()
-      });
-
-      await setDoc(DRAW_REF, {
-        lastWinnerHistoryId: historyRef.id
-      }, { merge: true });
-
-    } catch (historyError) {
-      console.error(
-        "Winner history saving error:",
-        historyError
-      );
-    }
-
+    // Display the winner.
     winnerElement.innerHTML = `
       <span>🎉 CONGRATULATIONS! 🎉</span>
-
-      <strong>
-        ${escapeHTML(winnerName)}
-      </strong>
-
+      <strong>${escapeHTML(winnerName)}</strong>
       <small>
-        Selected from ${winnerTicketCount} ${
-          winnerTicketCount === 1 ? "entry" : "entries"
+        Selected from ${winner.ticketsAtWin} ${
+          winner.ticketsAtWin === 1 ? "entry" : "entries"
         }!
       </small>
     `;
+
+    // Celebrate and update the participant information.
     launchConfetti();
 
     renderParticipants({ preserveWheel: true });
+
     await loadHistory();
 
     message(
-      `${winnerName} has won! All their entries have been removed.`,
+      `${winnerName} has won! Their entries are excluded and the winner is saved.`,
       "success"
     );
 
   } catch (error) {
-    console.error("Spin error:", error);
+    drawVersion = null;
+    currentEntries = [];
+
+    renderParticipants();
 
     message(
-      `Unable to complete the draw: ${error.message}`,
+      `${
+        committed
+          ? "Winner saved; reload the draw to recover its display"
+          : "Draw not confirmed; refresh entries and history before retrying"
+      }: ${error.message}`,
       "error"
     );
 
   } finally {
     isSpinning = false;
-
-    refreshBtn.disabled = false;
-
-    spinBtn.disabled =
-      currentEntries.length === 0;
+    refreshBtn.disabled = !isAuthorized;
+    spinBtn.disabled = !isAuthorized || currentEntries.length === 0;
   }
 }
 
@@ -1104,197 +1147,37 @@ async function spinWheel() {
 
 async function undoSelectedWinner(historyId) {
   if (!isAuthorized || isSpinning) return;
-
-  const selectedWinner = previousWinners.find(
-    winner => winner.id === historyId
-  );
-
+  const selectedWinner = previousWinners.find(winner => winner.id === historyId);
   if (!selectedWinner) {
     message("Winner record not found. Refresh and try again.", "error");
     return;
   }
-
   const winnerName = publicUsername(selectedWinner.displayName);
-  const winnerUid = selectedWinner.uid;
-
-  const ticketCount = Math.max(
-    0,
-    Math.floor(Number(selectedWinner.ticketsAtWin) || 0)
-  );
-
-  if (!winnerUid || ticketCount <= 0) {
-    message("The winner's original entry information is unavailable.", "error");
-    return;
-  }
-
-  const confirmed = confirm(
-    `Undo ${winnerName}'s win?\n\n` +
-    `${ticketCount} ${ticketCount === 1 ? "entry will" : "entries will"} be restored and this winner record will be deleted.`
-  );
-
-  if (!confirmed) return;
-
+  if (!confirm(`Undo ${winnerName}'s win? Historical entries will be restored. Refresh Latest Entries to validate current weights before spinning again.`)) return;
+  isSpinning = true;
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
-
-  historyElement.querySelectorAll("[data-undo-winner]").forEach(button => {
-    button.disabled = true;
-  });
-
-  message(`Restoring ${winnerName}'s entries...`);
-
+  message(`Restoring ${winnerName}'s eligibility...`);
   try {
-    const drawSnapshot = await getDoc(DRAW_REF);
-
-    if (!drawSnapshot.exists()) {
-      throw new Error("The saved draw could not be found.");
-    }
-
-    const drawData = drawSnapshot.data();
-
-    loadDrawSettings(drawData);
-
-    const savedEntries = Array.isArray(drawData.entries)
-      ? drawData.entries.map(entry => ({
-          ...entry,
-          displayName: publicUsername(entry.displayName)
-        }))
-      : [];
-
-    // Remove the winner from the excluded list.
-    excludedUids = excludedUids.filter(
-      uid => uid !== winnerUid
-    );
-
-    // Preserve the winner's restored ticket quantity after refresh.
-    if (winnerUid.startsWith("manual:")) {
-      const manualId = winnerUid.substring("manual:".length);
-
-      manualParticipants = manualParticipants.map(person =>
-        person.id === manualId
-          ? { ...person, tickets: ticketCount }
-          : person
-      );
-
-    } else {
-      ticketOverrides[winnerUid] = ticketCount;
-    }
-
-    // Use the saved custom name if one exists.
-    let restoredName = winnerName;
-
-    if (!winnerUid.startsWith("manual:") &&
-        Object.prototype.hasOwnProperty.call(nameOverrides, winnerUid)) {
-      restoredName = publicUsername(nameOverrides[winnerUid]);
-    }
-
-    if (winnerUid.startsWith("manual:")) {
-      const manualId = winnerUid.substring("manual:".length);
-      const manualPerson = manualParticipants.find(
-        person => person.id === manualId
-      );
-
-      if (manualPerson) {
-        restoredName = publicUsername(manualPerson.displayName);
-      }
-    }
-
-    // Remove any existing entries for this winner before restoring.
-    const updatedEntries = savedEntries.filter(
-      entry => entry.uid !== winnerUid
-    );
-
-    for (let i = 0; i < ticketCount; i++) {
-      updatedEntries.push({
-        uid: winnerUid,
-        displayName: restoredName
-      });
-    }
-
-    currentEntries = updatedEntries;
-
-    const remainingWinners = previousWinners.filter(
-      winner => winner.id !== historyId
-    );
-
-    const latestRemainingWinner = remainingWinners.length
-      ? remainingWinners[0]
-      : null;
-
-    const isUndoingLastWinner =
-      drawData.lastWinnerHistoryId === historyId ||
-      (
-        !drawData.lastWinnerHistoryId &&
-        drawData.lastWinner?.uid === winnerUid
-      );
-
-    // Save the restored entries and all custom settings.
-    const extraData = {};
-
-    if (isUndoingLastWinner) {
-      extraData.lastWinner = latestRemainingWinner
-        ? {
-            uid: latestRemainingWinner.uid,
-            displayName: publicUsername(latestRemainingWinner.displayName),
-            ticketsAtWin: latestRemainingWinner.ticketsAtWin,
-            drawnAt: latestRemainingWinner.drawnAt
-          }
-        : null;
-
-      extraData.lastWinnerHistoryId =
-        latestRemainingWinner?.id || null;
-    }
-
-    await saveDrawSettings(extraData);
-
-    // Delete the selected winner's history record.
-    await deleteDoc(doc(db, "ticketAwards", historyId));
-
-    if (isUndoingLastWinner) {
-      if (latestRemainingWinner) {
-        winnerElement.innerHTML = `
-          <span>LAST WINNER</span>
-          <strong>
-            ${escapeHTML(publicUsername(latestRemainingWinner.displayName))}
-          </strong>
-        `;
-      } else {
-        winnerElement.innerHTML = `
-          <span>WAITING FOR THE DRAW</span>
-          <strong>GOOD LUCK!</strong>
-        `;
-      }
-    }
-
-    await loadHistory();
+    const draw = await drawStore.undo(historyId);
+    loadDrawSettings(draw);
+    drawVersion = draw.version;
+    currentEntries = draw.entries;
+    winnerElement.innerHTML = draw.lastWinner
+      ? `<span>LAST WINNER</span><strong>${escapeHTML(publicUsername(draw.lastWinner.displayName))}</strong>`
+      : `<span>WAITING FOR THE DRAW</span><strong>GOOD LUCK!</strong>`;
     renderParticipants();
-
-    message(
-      `${winnerName}'s ${ticketCount} ${
-        ticketCount === 1 ? "entry has" : "entries have"
-      } been restored. They can now win again!`,
-      "success"
-    );
-
+    await loadHistory();
+    message(`${winnerName}'s win was undone. Refresh Latest Entries before spinning.`, "success");
   } catch (error) {
-    console.error("Undo selected winner error:", error);
-
-    try {
-      await loadSavedDraw();
-    } catch (reloadError) {
-      console.error("Reload error:", reloadError);
-    }
-
-    message(
-      `Unable to undo winner: ${error.message}`,
-      "error"
-    );
-
+    drawVersion = null;
+    currentEntries = [];
+    renderParticipants();
+    message(`Undo not confirmed. Refresh entries and history before retrying: ${error.message}`, "error");
   } finally {
-    refreshBtn.disabled = false;
-
-    spinBtn.disabled =
-      currentEntries.length === 0;
+    isSpinning = false;
+    refreshBtn.disabled = !isAuthorized;
+    spinBtn.disabled = !isAuthorized || currentEntries.length === 0;
   }
 }
 
@@ -1422,6 +1305,7 @@ historyElement.addEventListener("click", event => {
 
 if (editorList) {
   editorList.addEventListener("click", async event => {
+    if (!isAuthorized || isSpinning) return;
     const saveButton = event.target.closest("[data-save-participant]");
     const removeButton = event.target.closest("[data-remove-participant]");
 
@@ -1440,6 +1324,7 @@ if (editorList) {
       if (!nameInput || !ticketsInput) return;
 
       try {
+        isSpinning = true;
         saveButton.disabled = true;
 
         await updateParticipant(
@@ -1457,6 +1342,7 @@ if (editorList) {
         );
 
       } finally {
+        isSpinning = false;
         saveButton.disabled = false;
       }
 
@@ -1465,6 +1351,7 @@ if (editorList) {
 
     if (removeButton) {
       try {
+        isSpinning = true;
         removeButton.disabled = true;
         await removeParticipant(uid);
 
@@ -1477,6 +1364,7 @@ if (editorList) {
         );
 
       } finally {
+        isSpinning = false;
         removeButton.disabled = false;
       }
     }
@@ -1489,8 +1377,11 @@ if (editorList) {
 
 if (addEntryForm) {
   addEntryForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!isAuthorized || isSpinning) return;
     try {
-      await addManualParticipant(event);
+      isSpinning = true;
+      await addManualParticipant(event, true);
     } catch (error) {
       console.error("Add participant error:", error);
 
@@ -1498,6 +1389,46 @@ if (addEntryForm) {
         `Unable to add participant: ${error.message}`,
         "error"
       );
+    } finally {
+      isSpinning = false;
+    }
+  });
+}
+
+// ==========================================
+// BULK IMPORT EVENTS
+// ==========================================
+
+if (bulkPreviewBtn) {
+  bulkPreviewBtn.addEventListener("click", previewBulkImport);
+}
+
+if (bulkNamesInput) {
+  bulkNamesInput.addEventListener("input", clearBulkPreview);
+}
+
+if (bulkImportBtn) {
+  bulkImportBtn.addEventListener("click", async () => {
+    if (!isAuthorized || isSpinning) return;
+
+    try {
+      isSpinning = true;
+      bulkImportBtn.disabled = true;
+      await importBulkPreview(true);
+    } catch (error) {
+      console.error("Bulk import error:", error);
+      message(
+        `Unable to import participants: ${error.message} The draw will be reloaded; preview the list again before retrying.`,
+        "error"
+      );
+      isSpinning = false;
+      await loadSavedDraw();
+    } finally {
+      isSpinning = false;
+      if (bulkImportBtn) {
+        bulkImportBtn.disabled = !bulkPreviewState?.canImport;
+      }
+      spinBtn.disabled = !isAuthorized || currentEntries.length === 0;
     }
   });
 }
@@ -1524,6 +1455,12 @@ spinBtn.addEventListener("click", spinWheel);
 onAuthStateChanged(auth, async user => {
   isAuthorized = false;
   setPresentationMode(false);
+
+  drawVersion = null;
+  currentEntries = [];
+  previousWinners = [];
+  clearBulkPreview();
+  renderParticipants();
 
   spinBtn.disabled = true;
   refreshBtn.disabled = true;
@@ -1570,6 +1507,7 @@ document.querySelectorAll(".nav-btn").forEach(button => {
 
   button.addEventListener("click", async () => {
     if (!isAuthorized) return;
+    if (isSpinning) return;
 
     await loadSavedDraw();
   });

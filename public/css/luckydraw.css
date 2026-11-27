@@ -318,6 +318,140 @@
 }
 
 /* ==========================================
+   BULK IMPORT
+========================================== */
+
+.ld-bulk-import {
+  margin-top: 26px;
+  padding-top: 24px;
+  border-top: 1px solid var(--admin-line);
+}
+
+.ld-bulk-import h4 {
+  margin: 0 0 8px;
+  color: #fff;
+  font-family: 'Google Sans', sans-serif;
+  font-size: 16px;
+}
+
+.ld-bulk-import > p {
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.ld-bulk-import label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ld-bulk-import textarea {
+  width: 100%;
+  min-height: 160px;
+  box-sizing: border-box;
+
+  padding: 11px 12px;
+
+  color: #fff;
+  background: #17142b;
+
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+
+  outline: none;
+  resize: vertical;
+
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ld-bulk-import textarea:focus {
+  border-color: #a66be8;
+  box-shadow: 0 0 0 2px #a66be822;
+}
+
+.ld-bulk-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.ld-bulk-preview {
+  margin-top: 16px;
+  padding: 14px;
+
+  background: #17142b66;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+}
+
+.ld-bulk-preview[hidden] {
+  display: none;
+}
+
+.ld-bulk-summary {
+  margin: 0 0 8px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ld-bulk-error {
+  color: #ff8ba4;
+}
+
+.ld-bulk-preview-list {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.ld-bulk-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+
+  padding: 7px 0;
+  border-bottom: 1px solid #ffffff0d;
+
+  font-size: 12px;
+}
+
+.ld-bulk-row:last-child {
+  border-bottom: 0;
+}
+
+.ld-bulk-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #fff;
+}
+
+.ld-bulk-meta {
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow-wrap: anywhere;
+  text-align: right;
+  color: var(--admin-muted);
+}
+
+.ld-bulk-duplicate .ld-bulk-name,
+.ld-bulk-duplicate .ld-bulk-meta,
+.ld-bulk-invalid .ld-bulk-name,
+.ld-bulk-invalid .ld-bulk-meta {
+  color: #ff8ba4;
+}
+
+#ldBulkImportBtn {
+  width: 100%;
+  margin-top: 14px;
+}
+
+/* ==========================================
    EDIT PARTICIPANT LIST
 ========================================== */
 
@@ -531,6 +665,24 @@
 
   .ld-add-form button {
     width: 100%;
+  }
+
+  .ld-bulk-actions {
+    justify-content: stretch;
+  }
+
+  .ld-bulk-actions button {
+    width: 100%;
+  }
+
+  .ld-bulk-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .ld-bulk-meta {
+    max-width: none;
+    text-align: left;
   }
 
   .ld-editor-row {

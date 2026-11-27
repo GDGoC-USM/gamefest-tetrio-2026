@@ -358,6 +358,26 @@
           <p class="muted">Recomputes absolute correct-pick totals and full names, including legacy predictions. Only changed rows are written. Sign-in does not recalculate. Refresh Lucky Draw entries after recalculation.</p>
         </div>
 
+        <div class="admin-card" id="leaderboardManagement">
+          <h3>Leaderboard Management</h3>
+          <p>Remove test participants by UID, not by name. Removes leaderboard rows and predictions, not accounts or public profiles. Lucky Draw awards or winner exclusions block removal.</p>
+          <button type="button" class="btn secondary" id="loadParticipantsBtn">Load participants</button>
+          <div class="field">
+            <label for="participantSearch">Search by full name or UID</label>
+            <input id="participantSearch" type="search" autocomplete="off">
+          </div>
+          <p id="participantSelectionCount" role="status">0 selected</p>
+          <div id="participantList"></div>
+          <div class="form-actions">
+            <button type="button" class="btn secondary" id="previewCleanupBtn" disabled>Preview selected removal</button>
+            <button type="button" class="btn secondary" id="resumeCleanupBtn" hidden>Preview interrupted cleanup</button>
+            <button type="button" class="btn red" id="confirmCleanupBtn" disabled>Confirm removal and recalculate</button>
+          </div>
+          <div id="cleanupPreview"></div>
+          <p id="cleanupMessage" class="admin-message" role="status" aria-live="polite"></p>
+          <p class="muted">Interrupted cleanup is saved on the server. Load participants after reloading to resume; Lucky Draw stays blocked until cleanup and recalculation finish. Removal is not a permanent ban: preserved accounts can submit new predictions afterwards.</p>
+        </div>
+
         <div class="admin-card">
           <h3>Full name moderation</h3>
           <p>Reset an inappropriate audience full name to Participant. Predictions, scores and Lucky Draw entries are retained. The user can choose another name later.</p>
@@ -385,8 +405,8 @@
         <div class="admin-section-heading">
           <h2>Lucky Draw</h2>
           <p>
-            Spin the wheel to select a winner based on the
-            latest leaderboard entries.
+            Refresh to validate prediction awards. Spins stop if results or the
+            leaderboard change; previous winners remain excluded.
           </p>
         </div>
 
@@ -492,6 +512,12 @@
               EDIT LUCKY DRAW ENTRIES
             </span>
           </div>
+          <p class="muted">
+            Spins use prediction awards plus configured manual tickets. After
+            adding, removing or editing participants, Refresh Latest Entries before
+            spinning. Leaderboard ticket overrides must match prediction awards;
+            use Reset Edits to remove differing overrides.
+          </p>
 
           <!-- ADD MANUAL PARTICIPANT -->
 
@@ -542,6 +568,69 @@
 
           </div>
 
+          <!-- BULK MANUAL IMPORT -->
+
+          <div class="ld-bulk-import">
+
+            <h4>Bulk Import Participants</h4>
+
+            <p class="muted">
+              Paste one participant name per line. Empty lines are ignored and
+              each participant starts with one ticket. Up to 200 names per
+              import, 60 characters per name. Duplicate names are highlighted
+              but never merged or blocked.
+            </p>
+
+            <label for="ldBulkNames">
+              Participant names (one per line)
+
+              <textarea
+                id="ldBulkNames"
+                rows="9"
+                spellcheck="false"
+                placeholder="Alice&#10;Bobby&#10;Charlie"
+              ></textarea>
+            </label>
+
+            <div class="ld-bulk-actions">
+              <button
+                type="button"
+                class="btn secondary"
+                id="ldBulkPreviewBtn"
+              >
+                PREVIEW BULK IMPORT
+              </button>
+            </div>
+
+            <div
+              class="ld-bulk-preview"
+              id="ldBulkPreview"
+              hidden
+            >
+              <p
+                class="ld-bulk-summary"
+                id="ldBulkSummary"
+                role="status"
+                aria-live="polite"
+              ></p>
+
+              <div
+                class="ld-bulk-preview-list"
+                id="ldBulkPreviewList"
+              ></div>
+
+              <button
+                type="button"
+                class="btn primary"
+                id="ldBulkImportBtn"
+                disabled
+              >
+                IMPORT PARTICIPANTS
+              </button>
+            </div>
+
+          </div>
+
           <hr class="ld-editor-divider">
 
           <!-- EDIT EXISTING PARTICIPANTS -->
@@ -555,8 +644,8 @@
           </div>
 
           <p class="muted">
-            Changes are saved automatically when you finish editing a field.
-            Setting tickets to zero removes that participant from the wheel.
+            Select Save to persist edits, then Refresh Latest Entries before spinning.
+            Use Remove to exclude a participant without changing prediction awards.
           </p>
 
           <div id="ldEditorList">

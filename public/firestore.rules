@@ -31,6 +31,30 @@ service cloud.firestore {
         && data.rank is int && data.rank >= 1
         && data.updatedAt is timestamp && data.updatedAt == request.time;
     }
+    function validLeaderboardRevision(data) {
+      return data.keys().hasAll(["version", "ready", "cleanupPending", "updatedAt"])
+        && data.keys().hasOnly(["version", "ready", "cleanupPending", "updatedAt"])
+        && data.version is string && data.version.size() > 0
+        && data.ready is bool
+        && data.cleanupPending is bool
+        && (!data.ready || !data.cleanupPending)
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+    function participantCleanupActive(uid) {
+      let path = /databases/$(database)/documents/settings/participantCleanup;
+      return exists(path) && get(path).data.phase != "complete" && uid in get(path).data.uids;
+    }
+    function validParticipantCleanup(data) {
+      return data.keys().hasAll(["id", "version", "uids", "phase", "deletedPredictions", "deletedRows", "updatedAt"])
+        && data.keys().hasOnly(["id", "version", "uids", "phase", "deletedPredictions", "deletedRows", "updatedAt"])
+        && data.id is string && data.id.size() > 0
+        && data.version is string && data.version.size() > 0
+        && data.uids is list && data.uids.size() > 0
+        && data.phase in ["review", "deleting", "recalculating", "complete"]
+        && data.deletedPredictions is int && data.deletedPredictions >= 0
+        && data.deletedRows is int && data.deletedRows >= 0
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
     function room(id) {
       return get(/databases/$(database)/documents/rooms/$(id)).data;
     }
@@ -105,7 +129,7 @@ service cloud.firestore {
         && room(id).status != "completed";
     }
     function validPick(id, data) {
-      return available(id)
+      return !participantCleanupActive(request.auth.uid) && available(id)
         && data.keys().hasAll(["uid", "roomId", "stageId", "displayName", "selectedPlayers", "formatVersion", "updatedAt"])
         && data.keys().hasOnly(["uid", "roomId", "stageId", "displayName", "selectedPlayers", "formatVersion", "updatedAt"])
         && data.uid == request.auth.uid && data.roomId == id
@@ -147,9 +171,19 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    match /settings/leaderboardRevision {
+      allow get: if isAdmin();
+      allow create, update: if isAdmin() && validLeaderboardRevision(request.resource.data);
+      allow delete: if false;
+    }
+    match /settings/participantCleanup {
+      allow get: if isAdmin();
+      allow create, update: if isAdmin() && validParticipantCleanup(request.resource.data);
+      allow delete: if false;
+    }
     match /settings/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if !(id in ["leaderboardRevision", "participantCleanup"]);
+      allow write: if !(id in ["leaderboardRevision", "participantCleanup"]) && isAdmin();
     }
     match /predictions/{id} {
       allow get: if isAdmin() || ownsId(id) || (signedIn() && resource.data.uid == request.auth.uid);
@@ -162,6 +196,7 @@ service cloud.firestore {
         && id == request.auth.uid + "_" + resource.data.roomId
         && validPick(resource.data.roomId, request.resource.data);
       allow delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid
+        && !participantCleanupActive(request.auth.uid)
         && available(resource.data.get("roomId", resource.data.get("matchId", ""))));
     }
     match /leaderboard/{uid} {

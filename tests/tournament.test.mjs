@@ -207,6 +207,9 @@ test('admin status saves remain separate from publishing and reopening official 
     publishedDependentIds, dependentResets, withoutResults,
     document: { getElementById: element, querySelectorAll() { return []; } },
     auth: {}, onAuthStateChanged() {}, escapeHTML: value => String(value),
+    db: {}, doc() { assert.fail('Room handlers must use the test mutation adapter'); },
+    runTransaction() { assert.fail('Room handlers must use the test mutation adapter'); },
+    createLeaderboardRevisionStore() { return {}; },
     showMessage() {}, confirm: () => true, serverTimestamp: () => 'server-time',
     console: { error: error => errors.push(error.message) },
     recordWrite(sources, resetIds) {

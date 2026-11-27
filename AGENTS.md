@@ -30,6 +30,7 @@ These instructions apply to the entire repository. Read this file before running
 - `public/js/predict.js`: owner profile initialization/editing and private prediction subscriptions/saves/resets.
 - `public/js/usernames.js`: Unicode public-name validation, safe fallbacks and Google-name initialization policy.
 - `public/js/leaderboard-sync.js`: persisted ranking and changed-row planning; `leaderboard.js`: public listener and shared-rank rendering.
+- `public/js/lucky-draw-import.js`: pure bulk-name parsing, whitespace/case duplicate normalization, name/row limits and unique manual participant ID allocation.
 - `public/js/luckydraw.js`: weighted wheel, saved pool, winner history and undo inside `public/admin/index.html`.
 - `public/js/home.js` and `matches.js`: public room/result views. HTML/CSS remain page-specific; see README's structure map.
 - There is no application server, Cloud Function or scheduled scorer. Browser SDK imports come from Google's CDN and require network access on first load.
@@ -44,7 +45,7 @@ The Firebase project ID is `gamefest-tetrio-2026`. It appears in `public/js/fire
 - Changing the project ID would point the site at a different (or non-existent) database and break sign-in, saved predictions, and admin access.
 - Pushing to `main` triggers `firebase-hosting-merge.yml`, which deploys to the live site (`channelId: live`). Never push to `main`. Pull requests trigger a preview deploy, so open one only when authorized.
 - Never commit or print the `FIREBASE_SERVICE_ACCOUNT_GAMEFEST_TETRIO_2026` secret or any other credential.
-- For tests that write data, use a separate test project or the local emulators, never `gamefest-tetrio-2026`. If a task seems to require changing the project ID, stop and ask.
+- All data-writing verification must use loopback Firebase emulators with synthetic `demo-*` projects/accounts. Never use a production or PR-preview backend for tests, including this configured project ID. Keep tracked Firebase identifiers unchanged.
 
 ## Firebase and data safety
 
@@ -54,6 +55,7 @@ The Firebase project ID is `gamefest-tetrio-2026`. It appears in `public/js/fire
 - Do not deploy, alter remote data, publish/reopen tournament results, generate live brackets, or run/undo live draws without explicit authorization. Use a dedicated test project for checks that write data.
 - Never commit passwords, service-account files, private keys, tokens, or real participant data. Public Firebase web configuration is not a privileged credential.
 - Administrator authorization depends on Firebase Authentication plus `admins/<UID>` with `role: "admin"`. Preserve server-enforced Firestore permissions; do not replace them with a client-only check or a hardcoded password.
+- Preserve owner-only profile/prediction access, valid Google-name initialization and moderator reset limits. Draw/revision changes must not expose Auth emails, broaden profile reads, grant roles or weaken Firestore validation. Scoring stays one correct pick = one point = one entry.
 - A `.gitignore` rule does not remove a secret already committed to Git. If you discover one, report it without repeating its value; do not rewrite history or rotate credentials on your own.
 
 ## Behavior to preserve
@@ -71,8 +73,8 @@ Unless the task explicitly changes these rules:
 - Published rosters/status require **Reopen / Unpublish Results** before editing. Published results can be corrected directly with **Correct published results**, subject to the downstream guard. Reopening clears results, returns Upcoming and retains its own roster/predictions.
 - The dependency guard rejects publishing, correction, reopening and roster changes when any transitive dependent has published results **or Ended status**, even for identical/same-winner submissions. Reopen published dependents deepest-first; use Save Room to change an unpublished Ended dependent's status because it has no Reopen control.
 - Normal room operations commit fresh dependency/stale-state checks and room updates in one transaction. Only feeder rooms whose ordered confirmed player keys change reset; their predictions are deleted afterwards in batches of 450. Same-player corrections preserve downstream picks only when the guard permits correction. Existing feeder drift can also enter reset planning; review the confirmation.
-- Initialization/migration is explicitly confirmed, never automatic. It uses a separate unchunked batch, not the normal transaction/recovery path; never use it as routine cleanup.
-- Lucky Draw weights by `leaderboard.correct`, excluding zero-correct accounts and past winner UIDs. Refresh Latest Entries is manual. Undo restores eligibility and historical `ticketsAtWin`, not necessarily current leaderboard weight. Freshness, concurrent-draw protection and pointer/winner accuracy are not guaranteed; see README's open issues.
+- Initialization/migration is explicitly confirmed, never automatic. It fences fresh rooms and the leaderboard revision transactionally, then performs targeted prediction cleanup; never use it as routine cleanup.
+- Lucky Draw certifies authoritative `leaderboard.correct` counts and configured manual-participant tickets (whole numbers 0–10,000), excluding zero-ticket participants and past winner UIDs. Manual identity is `manual:<id>`, never a name; reject duplicate/missing IDs, leaderboard UID collisions, missing names, invalid ticket counts and separate manual ticket overrides. Additions, removals and ticket edits invalidate certification until refresh. Every spin transaction reads `settings/leaderboardRevision` and `ticketAwards/currentDraw`, rejects stale/dirty pools and atomically saves history/exclusion. Undo atomically restores eligibility and historical tickets; refresh must validate current weights before another spin. Leaderboard ticket overrides cannot differ from prediction awards; manual tickets never create leaderboard/base points.
 
 ### Identity, names and ranking
 
@@ -84,6 +86,7 @@ Unless the task explicitly changes these rules:
 - Public names come from profiles at successful admin recalculation, not private prediction identity/Auth email. Moderator resets can only set another user's name to `Participant`; owners may edit again. Renaming changes ordering, not UID ownership, scores or exclusions.
 - Scoring deduplicates UID/room submissions, preferring version 2 and then latest same-version timestamp. Legacy FINAL contributes only champion; series award at most one point. Unresolved/unpublished picks remain pending. Recalculation replaces absolute totals, never increments for resaving results.
 - Recalculation follows normal result/roster operations and initialization, or the explicit button; not admin sign-in, stage/lock toggles or status-only saves. It reads predictions/rooms/existing rows, queries distinct profiles in groups of at most 30 UIDs and writes changed/malformed rows or deletes obsolete rows in batches of 450. Unchanged rows retain `updatedAt`.
+- Keep the revision protocol on every scoring-affecting room/roster/migration and leaderboard writer, including future cleanup: atomically change its unique `version` and mark `ready:false` before changing source data. Only an owning, complete recalculation may set `ready:true`. Row chunks check ownership transactionally; never certify partial writes. Draw-only changes never change scores or public profiles.
 - Persisted ranks are sequential after correct-count/name sorting, with stable equal-name ordering. Public ranks are competition ties (1, 1, 3), sorting equal scores by name then UID. Do not use stored rank as the displayed tie rank.
 
 ### Firestore data and permissions
@@ -96,10 +99,11 @@ These are current client-written shapes, not a claim that legacy data is migrate
 | `rooms/<id>` | `name`, `stage`, sometimes `stageId`, `players`, `playerDetails`, `formatVersion: 2`, `status`, `resultsPublished`, `predictionsLocked`, timestamps, optional `feeders` | Public read; admin write |
 | Room results | Groups: `qualifiers`; series: `scores`, `winner`, `loser`; PLACEMENT: `rounds` map, `totals`, `placings`, `tied`, `decision` | Room permissions |
 | `settings/rounds_<stage>` | `predictionsOpen`, `updatedAt` | Public read; admin write |
+| `settings/leaderboardRevision` | Exactly `version` (unique string), `ready`, `cleanupPending`, server `updatedAt` | Admin get/write only; no list/public read/delete |
 | `profiles/<uid>` | Exactly `username`, `updatedAt` server timestamp | Owner/admin get; admin list; owner valid save or admin reset; no deletes |
 | `predictions/<uid>_<roomId>` | Exactly `uid`, `roomId`, `stageId`, `displayName`, `selectedPlayers`, `formatVersion: 2`, `updatedAt` server timestamp | Owner/admin read; owner validated saves; available owner reset or admin delete |
 | `leaderboard/<uid>` | Exactly `uid`, `displayName`, `correct`, `points` (= `correct`), `pending`, sequential `rank`, `updatedAt` server timestamp | Public read; admin validated write/delete |
-| `ticketAwards/currentDraw` | `entries[{uid,displayName}]`, `excludedUids`, `updatedAt`, optional `lastWinner{uid,displayName,ticketsAtWin,drawnAt}`, `lastWinnerHistoryId` | Admin access; owner read only if a document has matching `uid` |
+| `ticketAwards/currentDraw` | `entries[{uid,displayName}]`, `excludedUids`, draw `version`, certified `leaderboardVersion`, saved editor settings, `updatedAt`, optional `lastWinner{uid,displayName,ticketsAtWin,drawnAt}`, `lastWinnerHistoryId` | Admin access; owner read only if a document has matching `uid` |
 | `ticketAwards/<historyId>` | `type: "winner"`, `uid`, `displayName`, `ticketsAtWin`, server `drawnAt` | Admin write/read; matching owner read |
 | `matches/<id>` | Legacy collection, not the current bracket source | Public read; admin write |
 
@@ -109,8 +113,9 @@ All other paths are denied. Prediction rules independently validate stage, membe
 
 - Firestore free quota currently includes 50,000 reads/day, 20,000 writes/day, 20,000 deletes/day, 1 GiB storage and 10 GiB outbound/month. Hosting has separate project-wide quotas; see README's Firebase references. Source does not establish the live billing plan or remaining quota.
 - Subscriptions incur initial/update/reconnect reads: 150 viewers × 150 rows imply about 22,500 initial reads. Changed-row suppression does not cap usage. Avoid broad profile listeners and per-prediction profile reads.
-- Prediction deletion follows the room transaction. Caught delete-batch failures attempt refresh/recalculation; prediction-query failures bypass that recovery, and refresh/recalculation can fail too. Leftovers are pending only while rooms remain unpublished and can score after republishing. Never describe cleanup/recalculation as atomic or guaranteed.
-- Draw persistence/history/undo are separate writes: a history failure can leave an exclusion without an undoable history row, and undo deletes history before saving the restored draw. Do not promise transactional or concurrent-admin safety.
+- Keep Spark-compatible browser-only operations: no paid services, Functions, new listeners or per-ticket/per-prediction reads. Certified spins use two application document reads and two writes before transaction retries/rule lookups; refresh reads the leaderboard once, not once per ticket.
+- Prediction cleanup follows the room/revision transaction. Query/delete failures keep draws blocked and skip automatic recalculation. Resolve leftovers before explicit recalculation or republishing. Interrupted cleanup can leave `cleanupPending:true`; only an authorized maintainer may clear it after confirming cleanup has stopped and resolving leftovers. Never bypass it automatically.
+- Draw selection/history/exclusion and undo/history deletion each commit atomically. All editors use draw-version checks to avoid overwriting concurrent winners. Never select from cached/offline leaderboard reads or announce a winner before its transaction commits.
 - For synthetic cleanup, follow README's Reopen/Unpublish sequence, preserve own-room picks, resolve deletion failures before republishing and undo test winners separately. Never bulk-delete production collections or use initialization as cleanup.
 - Open issues are proposals, not permission to implement them. Base participation points, audience/Form import/linking, wheel safeguards/presentation, unified auth, name refinements and personal statistics are not current feature guarantees; see README.
 
