@@ -1,246 +1,246 @@
 # GameFest TETR.IO Showdown
 
-A tournament management and audience prediction website for GameFest. Visitors follow rooms and results, sign in with Google, predict group qualifiers and head-to-head winners, and earn leaderboard points. Administrators manage the bracket, publish results, and run a weighted Lucky Draw.
+Tournament management, audience predictions and an administrator-operated Lucky Draw for GameFest TETR.IO Showdown 2026. The event concluded on **28 November 2026**. The project is complete for the 2026 event and available for future maintenance and reuse; not every proposed improvement was implemented.
 
-Public site: https://gamefest-tetrio-2026.web.app/ · Repository: https://github.com/GDGoC-USM/gamefest-tetrio-2026
+**Website:** https://gamefest-tetrio-2026.web.app/
 
-Current features include live room views, stage/room prediction controls, competitor CSV roster import, result publication/correction/reopening, UID-based scoring, editable public names, and an administrator-operated weighted wheel with history/undo. “Lucky Wheel” in issues refers to the existing **Lucky Draw** dashboard module, not a separate public page.
+**Repository:** https://github.com/GDGoC-USM/gamefest-tetrio-2026
 
-## Technology
+**Architecture visualisation:** https://gitdiagram.com/gdgoc-usm/gamefest-tetrio-2026
 
-- Plain HTML, CSS, and browser JavaScript modules; no frontend framework or build step.
-- Firebase Authentication for Google sign-in and administrator email/password sign-in.
-- Cloud Firestore for tournament data, predictions, rankings, and draw history.
-- Firebase Hosting for serving the `public/` directory.
-- Firebase JavaScript SDK 11.10.0, imported directly from Google's CDN.
+## Start here: handover to future batches
 
-There is no `package.json` or build step. Pure regression scenarios use Node's built-in test runner; no dependencies are needed to run them. The checked-in GitHub workflows deploy Firebase Hosting previews for pull requests and the live site on pushes to `main`; do not push or open a PR without authorisation.
+Read **[For thou in the future](For%20thou%20in%20the%20future.md)** before significant changes. This original, human-written account covers development history, D-Day experiences, technical challenges, known bugs, mobile/desktop UI/UX suggestions, security and infrastructure concerns, and advice for future Technical Department members. Its informal wording and personal closing are preserved unchanged.
 
-## Project structure
+Treat its incidents and suggestions as historical observations, not verified root causes or permission to repeat production workarounds. In particular, never derive public names from email addresses. Understand the architecture and verify behavior against source and tests before changing it.
+
+## Technology and current functionality
+
+Static HTML, CSS and browser JavaScript ES modules; Firebase Authentication, Cloud Firestore and Firebase Hosting; Firebase JavaScript SDK **11.10.0** from Google's CDN. There is no framework, application server, Cloud Function, scheduled scorer, package manifest or build step. Browser SDK loading needs network access on first load.
+
+Participants can:
+
+- Follow rooms, the knockout bracket and published results on Home and Matches.
+- Use shared Google sign-in/sign-out controls on Home, Matches, Predict and Leaderboard, with session-restoration/error states.
+- Edit their public Full Name on Predict; save, change or reset private room predictions while permitted.
+- View public rankings, UID-matched personal prediction statistics, their highlighted row and **Find my position**. Personal **Submitted Tickets** counts unique saved prediction rooms, not selected players or Lucky Draw tickets.
+- Read the [participant FAQ](public/faq.html) for navigation, predictions, deadlines and troubleshooting. **Its draw-policy wording predates base tickets; use the policy below.**
+
+Administrators can:
+
+- Configure rosters manually or by validated competitor CSV import; manage statuses and stage/room prediction controls.
+- Publish, correct and reopen results with dependency/stale-state checks and targeted feeder resets.
+- Recalculate absolute leaderboard scores, reset public names to `Participant`, and preview/resume UID-scoped test-participant cleanup.
+- Refresh/certify draw tickets; manage manual participants and bulk pasted names; remove/restore participants independently of winner exclusions.
+- Run a weighted wheel with presentation mode, synchronized pointer/result geometry, winner celebration, persisted history and undo.
+
+### Tournament and prediction rules
+
+- Groups `A`–`D` have eight slots each; blanks are allowed, but readiness needs at least two distinct real players. Five cumulative group FFA rounds are the documented format; the application records only two manually published qualifiers in first/second order, not group-round scores. Roster order never determines seeds.
+- Quarter-finals are two-player FT7: `QF1=A1/B2`, `QF2=C1/D2`, `QF3=B1/A2`, `QF4=D1/C2`. A1/A2 mean published qualifier order.
+- `SF1` takes QF1/QF2 winners; `SF2` takes QF3/QF4 winners. Both are FT9. Their winners enter `FINAL` (FT11); losers enter `THIRD` (FT9).
+- QF losers enter `PLACEMENT`: five ordered four-player FFA rounds, worth 4/3/2/1 competition points. Tied totals leave placings pending unless an organiser supplies a complete ranking consistent with unequal totals. Unresolved ties may be published. These are not audience prediction points.
+- Groups accept two distinct qualifier picks, unordered for scoring; each series, including THIRD, accepts one winner. PLACEMENT has no predictions. Each correct selected player earns **one leaderboard point and one additional draw ticket**. No multipliers or podium bonuses; unresolved/unpublished picks remain pending.
+- Saving/resetting requires sign-in, an open stage, ready/confirmed players, an unlocked room, unpublished results and status other than `completed`. FINAL/THIRD share the `final` stage. **Live does not lock predictions.** Only `predictionsLocked === true` locks a room; a missing flag means unlocked. Locks preserve saved picks and survive roster/result/migration changes.
+- Stored statuses are `upcoming`, `live`, `completed` (displayed **Ended**). Status-only saves neither publish results nor advance feeders, delete picks or recalculate scores.
+- Published rosters/status require **Reopen / Unpublish Results** before editing. **Correct published results** permits direct corrections, subject to the dependency guard. Reopening clears results, returns Upcoming and retains the room's own roster/predictions.
+- Publishing, correcting, reopening and roster changes are blocked if any transitive dependent has published results **or Ended status**, even for identical/same-winner submissions. Reopen published dependents deepest-first; change unpublished Ended dependents through **Save Room**.
+- Normal room updates and fresh dependency/source checks commit transactionally. Only feeders whose ordered confirmed player keys change reset; their predictions are deleted afterwards in batches of 450. Existing feeder drift can also require resets. Cleanup failures block certification and automatic recalculation; do not republish until leftovers are resolved.
+- Initialization/migration requires explicit confirmation, fences rooms/revision transactionally and performs targeted cleanup. It is not routine cleanup and never runs automatically.
+
+### Scoring versus Lucky Draw tickets
+
+**Leaderboard points remain exactly `correct`. There are no base leaderboard points.** The draw adds a base ticket separately:
+
+| Source | Current draw entitlement |
+| --- | --- |
+| Website participant represented by a leaderboard row | `1 + correct` tickets, including a row with zero correct picks |
+| Newly bulk-imported manual participant | One ticket initially |
+| Existing manual participant | Configured whole-ticket count, 0–10,000 |
+
+Signing in alone does not create a leaderboard row or guarantee draw eligibility. Website rows are derived from saved predictions during recalculation; this is not an attendance/registration registry. Repeated refreshes and recalculations do not accumulate base tickets. Manual tickets create no profile, prediction, leaderboard point or Auth link.
+
+**Refresh Latest Entries** certifies the server leaderboard and saved manual participants against a complete `settings/leaderboardRevision`. Draws store `ticketPolicy: 2`; old-policy pools must refresh before spinning. Leaderboard ticket overrides must equal `1 + correct`; separate manual ticket overrides, duplicate/missing IDs, UID collisions, missing names and invalid counts block certification.
+
+Identity is Firebase UID for website users and `manual:<id>` for manual participants, never a display name. Zero-ticket manual entries, past-winner `excludedUids` and administrator `removedUids` are excluded. Removal persists across refresh/reload/import without changing scores, predictions or accounts. **Removed Participants → Restore** rebuilds current eligibility; it does not undo a previous win.
+
+Each spin checks revision and draw version, commits history/exclusion atomically **before** animation/reveal, and removes all winner tickets. Undo atomically deletes the selected history record and restores historical tickets/eligibility, then requires refresh to validate current weights. Stale editors/spins are rejected instead of overwriting another operator's work.
+
+**Bulk Import Participants** accepts up to 200 newline-separated names, trims edges, ignores empty lines and previews before confirmation. Names over 60 characters and oversized lists block import. Case/whitespace-normalized duplicates are highlighted and counted, but **do not block, merge or deduplicate entries**. Every imported row receives a distinct manual ID and one ticket in a single version-checked draw transaction. A Forms export must be reduced to supported names input; there is no structured Form importer or verified Form-to-Auth linking. Operators must review overlapping manual/website identities to avoid duplicate real-person eligibility.
+
+**Backup draw:** no separate backup/offline Lucky Draw implementation is present in the checked-in application. Ignored local snapshots and generated test copies are not supported contingency tools. Future organisers need an approved offline plan; do not assume the existing wheel works without Firebase.
+
+### Names, privacy and authentication
+
+Audience identity is always Firebase UID; duplicate public full names are allowed. Competitor keys are separate immutable strings in `rooms/<id>.players`, with text `playerDetails[key].participantId` (including leading zeroes) and trimmed `username`. Never merge either identity by name.
+
+`profiles.js` transactionally initializes missing profiles from valid Google display names on the four public pages, never from email/local parts. Valid custom names and timestamped `Participant` profiles survive sign-in; only legacy `Participant` without `updatedAt` can auto-repair. Invalid/missing defaults show a temporary label and owner-edit prompt.
+
+Full Name editing is independent of prediction locks. Names allow 3–80 Unicode code points from letters/marks/numbers, ordinary spaces and `. , ' ’ · ( ) _ -`, with a letter/number. Ordinary edge spaces are trimmed; emails, HTML, controls and invisible formatting are rejected. The internal field remains `username`. Public leaderboard names update at successful admin recalculation, not immediately after an owner edit.
+
+Profile loading is per account/page, not a broad real-time listener. Predict shares the initialization path rather than duplicating it; **Leaderboard currently adds a separate owner-profile read for its personal card**. Auth headers use the validated Google name, the personal card uses the saved profile, and the public row uses the last recalculation, so labels can temporarily differ.
+
+Admins can load private profiles for moderation and reset another user's name only to `Participant`; owners may edit again. Predictions store compatibility `displayName: "Participant"` intentionally; scoring/public names do not use Auth emails or historical prediction identities. Rendering a fallback does not remove old public document fields: any production inspection/repair needs separate authorization.
+
+Google popup authentication and SDK default persistence are retained; there is no explicit persistence policy. Do not promise cross-origin sharing or restoration with blocked browser storage. Denied Admin access preserves the audience session while hiding the dashboard; server permissions still enforce access. Sign out explicitly to switch accounts. Admin additionally supports Email/Password.
+
+## Architecture and repository structure
 
 ```text
 .
-├── README.md                 Project setup and team workflow
-├── AGENTS.md                 Instructions for AI contributors
-├── README_FIRST.txt          Supplementary operations; see caveats below
-├── .gitignore                Local cache, logs, dependencies, and environment files
-├── .firebaserc               Default Firebase deployment project
-├── firebase.json             Hosting directory and Firestore rules path
-├── tests/                    Node regressions and isolated Firestore rule tests
+├── README.md                         Current setup, operations and handover
+├── AGENTS.md                         Actionable AI engineering instructions
+├── For thou in the future.md         Original personal handover (preserve verbatim)
+├── README_FIRST.txt                  Historical notes; caveats below
+├── firebase.json / .firebaserc       Hosting/emulators/rules and project identity
+├── .github/workflows/                Hosting preview/live deployment only
+├── docs/
+│   ├── screenshots/dday-results/     Seven historical event captures
+│   ├── screenshots/tests/            Relocated development screenshots
+│   └── superpowers/plans/            Local historical planning material (ignored)
+├── tests/
+│   ├── *.test.mjs                    Pure Node and isolated Firestore rule checks
+│   ├── lucky-draw.browser.mjs        Synthetic authenticated browser harness
+│   ├── username-cases.mjs            Shared name-validation fixtures
+│   └── screenshots/pr51/             Presentation regression captures
 └── public/
-    ├── index.html            Homepage and room overview
-    ├── matches.html          Tournament rooms and published results
-    ├── predict.html          Audience prediction interface
-    ├── leaderboard.html      Public rankings
-    ├── faq.html              Participant FAQ and user guide
-    ├── firestore.rules       Database permissions and prediction validation
-    ├── admin/
-    │   └── index.html        Admin dashboard and Lucky Draw interface
-    ├── css/
-    │   ├── style.css         Public pages
-    │   ├── admin.css         Admin dashboard
-    │   └── luckydraw.css     Lucky Draw
-    ├── images/               Gamefest and GDG branding
-    └── js/
-        ├── firebase-config.js  Browser Firebase configuration
-        ├── shared.js           Firebase initialization, auth, and shared helpers
-        ├── tournament.js       Pure tournament format, validation, feeders, and scoring
-        ├── roster-import.js    Pure CSV parsing, identity checks and preview planning
-        ├── home.js             Homepage data and sign-in controls
-        ├── matches.js          Public room and result display
-        ├── predict.js          Prediction selection, saving, and room updates
-        ├── usernames.js        Full-name validation and privacy-safe profile defaults
-        ├── leaderboard.js      Public leaderboard display
-        ├── leaderboard-sync.js Pure ranking and changed-row planning
-        ├── admin.js            Room management, bracket generation, and scoring
-        ├── lucky-draw-sync.js  Transactional draw refresh, spin and undo
-        ├── lucky-draw-import.js Pure bulk-name parsing, duplicate checks and manual ID planning
-        ├── lucky-confetti.js   Reduced-motion-aware winner celebration
-        ├── lucky-wheel-geometry.js Pure segment, rotation and label geometry
-        └── luckydraw.js        Ticket selection, wheel rendering and winner history
+    ├── index.html / matches.html     Home, room/results and bracket views
+    ├── predict.html                  Private predictions and public-name editing
+    ├── leaderboard.html / faq.html   Rankings/personal statistics and user guide
+    ├── admin/index.html              Protected dashboard and Lucky Draw
+    ├── firestore.rules               Database permissions/validation
+    ├── css/                          style.css, admin.css, faq.css, luckydraw.css
+    ├── fonts/                        Google Sans / Google Sans Mono assets
+    ├── images/                       Event and GDGoC branding
+    └── js/                           Browser ES modules (responsibilities below)
 ```
 
-Page scripts share Firebase access through `shared.js`. The main Firestore collections are `rooms`, `settings`, `profiles`, `predictions`, `leaderboard`, `admins`, and `ticketAwards`. Rules accept new room-based predictions only; legacy records remain readable and are rescored where applicable.
-
-## Tournament behavior
-
-- Groups `A`, `B`, `C`, and `D` each have eight slots; blanks are permitted. The documented event format is five cumulative free-for-all (FFA) rounds, but the application records only two manually published qualifiers in first/second order, not group-round scores. Roster order never determines seeds.
-- Eight qualifiers enter four head-to-head quarter-finals (`QF1`–`QF4`, first to 7). Semi-finals (`SF1`, `SF2`) and the third-place match (`THIRD`) are first to 9; `FINAL` is first to 11.
-- Semi-final winners enter `FINAL`; semi-final losers enter `THIRD`. The four quarter-final losers enter `PLACEMENT`: five FFA rounds, awarding 4/3/2/1 points per round. Total points determine fifth through eighth; tied totals leave placings pending until an organiser records an explicit decision.
-- Predictions select two group qualifiers (unordered for scoring) or one winner per head-to-head series. There are no predictions for FFA placement positions. Each correct selected player earns exactly **one point and one Lucky Draw entry**. Unresolved results remain pending, not incorrect.
-- Administrators control prediction availability by stage and can lock individual rooms under **Admin → Rooms**. A room accepts predictions only when its stage is open, its room lock is off, its players are ready, and its results are unpublished and status is not Ended. Locking or ending preserves saved picks and blocks new picks, edits and user resets; unlocking never overrides the other restrictions. Leaderboard recalculation replaces absolute totals from current published results; resaving an unchanged result never adds points again. Legacy semi-final/final picks receive no old bonuses or podium scoring.
-- Lucky Draw weights leaderboard entries by authoritative `leaderboard.correct` and manual participants by their configured whole-ticket counts (0–10,000). Zero-ticket participants and past winner UIDs are excluded. Administrators can remove an individual leaderboard or manual participant; all of that participant's tickets stay excluded across refresh, reload, synchronisation and bulk import, and **Removed Participants → Restore** recalculates current eligibility without changing their leaderboard row, predictions or account. Removals are separate from past-winner exclusions. **Refresh Latest Entries** certifies both sources against one complete leaderboard revision. Manual entries retain separate `manual:<id>` identities; duplicate names do not merge people. Missing/duplicate IDs, collisions with leaderboard UIDs, missing names, invalid counts and separate manual ticket overrides block certification. Adding, removing or editing manual participants invalidates certification until refreshed. Leaderboard ticket overrides must still equal prediction awards. Every spin transaction rejects dirty/outdated revisions and stale draw state, then atomically saves the winner, history and exclusion before animation. Undo restores eligibility and historical tickets atomically; refresh validates current weights before another spin. Manual tickets do not create leaderboard points or base participation credit.
-
-- **Bulk Import Participants** accepts up to 200 newline-separated names per import, trims surrounding whitespace, ignores empty lines, and previews every entry before confirmation. Each name starts with one ticket and receives its own generated manual ID. Names longer than 60 characters or lists above the row limit block import with row-level messages. Names are compared after trimming, collapsing repeated internal spaces and case-folding; duplicates within the paste or against current wheel participants are highlighted red and counted, but never block import, merge entries or remove participants. Original spelling and capitalisation are preserved and names render as text. Imports are saved in one draw transaction, so a concurrent administrator change rejects the whole import. The bulk path uses the same manual-participant field and ticket-pool invalidation as single addition; it creates no profile, leaderboard row or participation point.
-
-Reopening clears the room's results, returns Upcoming and retains its roster and own predictions. Normal result/roster changes reset feeder rooms only when their ordered confirmed player keys change; reset-room predictions are deleted afterwards in batches of 450. Room updates, dependency checks and stale-source checks share one Firestore transaction; prediction deletion and leaderboard recalculation are separate.
-
-The dependency guard blocks publishing, correction, reopening and roster changes whenever a transitive dependent has published results **or Ended status**, including an unpublished Ended room. This also blocks identical/same-winner submissions. Reopen published dependents deepest-first; change unpublished Ended dependents to Upcoming with **Save Room** because they have no Reopen control. Once the guard permits a same-player correction, downstream results/picks are retained.
-
-Exact feeds: `QF1=A1/B2`, `QF2=C1/D2`, `QF3=B1/A2`, `QF4=D1/C2`; `SF1` takes QF1/QF2 winners and `SF2` QF3/QF4 winners. A1/A2 mean A's published first/second qualifier. Only valid published results advance players; unresolved feeder slots remain unpickable.
-
-Room locks use `rooms/<id>.predictionsLocked`. Only `true` locks a room; a missing field means unlocked for backward compatibility. New rooms start unlocked. Stage toggles, roster changes, publishing/reopening results and format migration retain explicit locks, including locks on dependent rooms. Changing a lock alone never changes match status, results, bracket dependencies or saved predictions. `PLACEMENT` has no predictions or lock control.
-
-Administrators can save **Upcoming**, **Live** or **Ended** under the room editor. Ended uses stored `status: "completed"`; it blocks prediction saves/resets but does not publish, advance feeders or score picks. **Live does not automatically lock predictions**: lock the room separately. Unpublished Ended rooms allow result entry. **Publish Results** confirms results; **Correct published results** can correct them directly subject to the downstream guard. Reopen is required before changing a published roster/status, not every result correction. Reopening preserves explicit locks.
-
-Player references remain stable legacy string keys in `rooms/<id>.players`. Separate `playerDetails[key]` fields hold a text participant ID (preserving leading zeroes) and a trimmed username. Organisers enter the roster in the admin dashboard; never commit a real roster. Initialising/migrating the tournament requires explicit destructive confirmation in the admin dashboard; it never runs automatically on page load.
-
-### Known discrepancies and proposed work
-
-This audit uses `main` at `c9d4eb9` and the source, not production-data inspection. Merged features include knockout/+1 scoring ([#12](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/12)), roster import ([#18](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/18)), room locks ([#20](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/20)), private profiles/changed-row synchronization ([#22](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/22)), Google-name defaults/Ended status ([#28](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/28)) and transactional room operations ([#26](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/26)).
-
-These open issues are **not implemented guarantees**:
-
-| Issue | Remaining proposal or reported limitation |
+| Modules in `public/js/` | Responsibility |
 | --- | --- |
-| [#29](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/29) | Pointer/winner synchronization, wheel readability/presentation mode, audience/Form imports and identity linking, one-time base participation points/entries |
-| [#30](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/30) | Shared transactional Google-name defaults now run on all four public pages; timestamped/ambiguous placeholders still require owner editing, not migration |
-| [#31](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/31) | Shared public auth controls and restoration states; denied Admin access preserves audience sessions; browser/storage-dependent persistence still needs environment-specific verification |
-| [#32](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/32) | Personal prediction statistics and highlighting the signed-in leaderboard row |
-| [#15](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/15) | Enforced administrator anti-abuse controls/monitoring; production provider settings are not established by source |
+| `firebase-config.js`, `shared.js` | Public Firebase configuration, loopback routing, SDK/auth exports and escaping/helpers |
+| `auth-ui.js`, `profiles.js`, `usernames.js` | Shared auth states, transactional profile initialization and Unicode name policy |
+| `tournament.js`, `roster-import.js` | Pure formats/results/feeders/reset planning/scoring and competitor CSV validation |
+| `home.js`, `matches.js`, `predict.js` | Public views, owner predictions and name editor |
+| `leaderboard.js`, `leaderboard-sync.js` | Public/personal views, competition ranks, persisted ranking and changed-row planning |
+| `leaderboard-recalculate.js`, `leaderboard-revision.js` | Profile-aware absolute recalculation and transactional revision fencing |
+| `admin.js`, `participant-cleanup.js` | Dashboard operations/moderation and durable UID-scoped cleanup/recovery |
+| `luckydraw.js`, `lucky-draw-sync.js` | Draw UI/presentation and transactional pool certification/spin/undo |
+| `lucky-draw-import.js`, `lucky-wheel-geometry.js`, `lucky-confetti.js` | Bulk names/manual IDs, pointer/segment geometry and reduced-motion-aware celebration |
 
-There are currently **no base participation points**, no audience/Form importer and no registration-to-Auth link. The CSV importer below handles competitors, not wheel participants. Points equal correct picks; certified wheel weights use correct picks. Wheel presentation/readability remains separate work under #29; this change protects persisted selection, not every aspect of presentation.
+### Firestore collections and security
 
-`README_FIRST.txt` retains event context but contains conflicting instructions: its create-project/combined-deploy sections do not apply to this configured repository; results can be corrected without reopening; resets are conditional; and cleanup recovery is not guaranteed for every failure. Follow this README/current source in those cases. Its organiser questions remain unresolved: THIRD is implemented as FT9 despite an FT5 rulebook reference, FFA ties need manual decisions, and roster completeness/knockout prediction intent need confirmation. Do not silently change the application to resolve intended requirements.
+These are current client-written shapes, not proof that historical documents or deployed rules match them. See [checked-in rules](public/firestore.rules).
 
-Other current limitations: CSV preview lists dependents more broadly than targeted save may reset; manual roster editing lacks CSV's global ID/username uniqueness checks. Initialization/migration uses a separate unchunked batch, not the normal transaction path. These are reported findings, not application changes in this documentation PR.
-
-## Full names and privacy
-
-On the prediction page, signed-in viewers can save their public **Full Name** independently of predictions, including while predictions are locked or ended. Names contain 3–80 Unicode code points: letters, combining marks, numbers, ordinary spaces and the punctuation `. , ' ’ · ( ) _ -`, with at least one letter or number. Ordinary edge spaces are trimmed. Emails, HTML, control characters, line breaks and invisible formatting characters are rejected. Duplicate names are allowed; Firebase UID remains the permanent identity. Competitor TETR.IO usernames and participant IDs are unchanged.
-
-For a missing profile, Home, Matches, Predict and Leaderboard save a valid Google account display name once through the shared initializer. Every sign-in entry point discloses this public-name default and links to the editable name on Predict; no email or email local part is used. If Google provides no valid name, viewers see a temporary `Participant` label and a prompt to enter their full name on Predict. Existing valid custom profiles are never overwritten on sign-in. An old `Participant` profile without `updatedAt` can be repaired on its owner's next login; timestamped `Participant` profiles require explicit owner editing because they may be moderator resets or deliberate choices. Ambiguous/invalid existing profiles are not silently replaced. No provenance migration or stronger consent policy is introduced.
-
-`profiles/<uid>` still stores exactly `username` and `updatedAt` (a server timestamp); `username` is retained as an internal compatibility field, not an audience-facing label. Owners can retrieve and save their own profile, but cannot list profiles or read another person's profile. Authorised administrators can retrieve individual profiles and list profiles. They can reset another account's name only to `Participant`, not assign an arbitrary replacement. Clients cannot delete profiles or grant administrative roles.
-
-Each public page reads the owner's profile once per sign-in/session load, not through a real-time listener. `profiles.js` shares the initialization transaction with Predict's editor/retry path, so a concurrent custom-name save or moderator reset is preserved rather than overwritten by a stale Google default. Predict does not perform a second initialization read through the auth controller. A normal load reads one profile and adds at most one initialization write; contention can require transaction retries. Existing valid profiles add no writes. Navigation adds one owner-profile read per page. Profile state clears on sign-out or account switching. Names become public at the next successful administrator leaderboard recalculation, not immediately. Changing a name never changes authentication identity, predictions, scores, Lucky Draw ownership or previous-winner exclusions.
-
-Under **Admin → Prediction Settings → Full name moderation**, select **Load full names**, select the name/account UID, and confirm **Reset full name to Participant**. Recalculate the leaderboard when ready. Users may choose another name afterwards; permanent restrictions and automatic filtering are not implemented.
-
-Leaderboard and Lucky Draw names use valid stored public names or `Participant`, never emails or legacy prediction identities. The required prediction `displayName` compatibility field remains `Participant`; private predictions and historical award records are not migrated. Public names are validated and escaped at rendering boundaries. Full names are intentionally public: the profile editor explains this before a viewer saves a custom name.
-
-The public `leaderboard/<uid>` schema is exactly:
-
-| Field | Value |
+| Path | Purpose and permissions |
 | --- | --- |
-| `uid` | Permanent Firebase UID, equal to the document ID |
-| `displayName` | Valid profile full name, otherwise `Participant` |
-| `correct` | Non-negative integer correct-pick/Lucky Draw entry count |
-| `points` | Equal to `correct` |
-| `pending` | Non-negative integer unresolved-pick count |
-| `rank` | Existing sequential persisted rank |
-| `updatedAt` | Server timestamp of the last persisted change |
+| `admins/<uid>` | `role: "admin"`; own/admin read, no browser writes |
+| `rooms/<id>` | Public rooms, rosters, format/status/locks/results/feeders; admin writes |
+| `matches/<id>` | Legacy public matches; admin writes, not current bracket source |
+| `settings/rounds_<stage>` | Public `predictionsOpen`, timestamp; admin writes |
+| `settings/leaderboardRevision` | Admin-only get/create/update; exactly `version`, `ready`, `cleanupPending`, server `updatedAt`; no delete/list |
+| `settings/participantCleanup` | Admin-only durable job; `id`, `version`, `uids`, `phase`, `deletedPredictions`, `deletedRows`, server `updatedAt`; no delete/list |
+| Other `settings/<id>` | Public reads, admin writes |
+| `profiles/<uid>` | Exactly `username`, server `updatedAt`; owner/admin get, admin list, owner valid save or admin reset-only; no deletes |
+| `predictions/<uid>_<roomId>` | Exactly `uid`, `roomId`, `stageId`, `displayName`, `selectedPlayers`, `formatVersion: 2`, server `updatedAt`; private owner/admin reads, validated owner saves/resets, admin deletes |
+| `leaderboard/<uid>` | Public exact schema: `uid`, `displayName`, `correct`, `points` (= correct), `pending`, sequential `rank`, server `updatedAt`; validated admin writes/deletes |
+| `ticketAwards/currentDraw` | Entries/settings, manual participants, overrides, `removedUids`, winner `excludedUids`, `version`, `leaderboardVersion`, `ticketPolicy`, timestamps/last winner; admin access |
+| `ticketAwards/<historyId>` | Winner `type`, UID, display name, `ticketsAtWin`, server `drawnAt`; admin access, matching owner read |
 
-Public equal-score rows retain shared ranks and alphabetical name ordering, then UID ordering. Renaming may change ordering within ties, but never scores or entry ownership. Recalculation replaces documents without merging, removing stale names and unexpected fields. Hiding an invalid name in the UI does **not** remove the underlying publicly readable document fields; production inspection or repair needs separate authorisation. No automatic production cleanup is provided.
+All unmatched paths are denied. Draw-document owner reads require a matching document `uid`; `currentDraw` normally has none. Rules enforce prediction ownership/stage/lock/status/membership/feeders and strict profile/leaderboard schemas. They trust authorized admins for room/draw writes; they do not recompute official results or enforce every client transaction invariant. Never weaken rules, expose Auth directories or replace admin membership with hidden UI/a password in source.
 
+### Recalculation, efficiency and recovery
 
-## Leaderboard recalculation and Spark usage
+Recalculation deduplicates predictions by UID/room, preferring version 2 then the latest same-version timestamp. Legacy FINAL contributes only champion. It replaces absolute totals; corrections/reopening can reduce scores. Persisted ranks are sequential after correct-count/name sorting with stable equal-name ordering; public ranks use competition ties (1, 1, 3), then name/UID ordering. Personal stats use the public rank, not stored sequential rank; pending counts are stored but not displayed.
 
-Use **Admin → Prediction Settings → Recalculate leaderboard** to intentionally refresh names or repair stale data. Admin sign-in does not recalculate. Publishing, correcting or reopening results, roster changes and initialization trigger recalculation after successful room processing. Stage toggles, room locks and status-only saves do not. Unchanged published-result submissions recalculate only if the dependency guard allows them.
+Publishing/correcting/reopening, roster changes and initialization trigger recalculation after successful processing; explicit **Recalculate leaderboard** also refreshes names. Admin sign-in, stage toggles, room locks and status-only saves do not. Recalculation reads predictions, rooms and existing rows, queries distinct profiles in groups of at most 30 UIDs, and writes only changed/malformed rows or deletes obsolete rows in revision-checked chunks of 450. Unchanged rows retain timestamps.
 
-Each recalculation reads predictions, rooms and the existing leaderboard once from the server, deduplicates predictions, and queries distinct participating profiles in document-ID groups of at most 30. It adds no profile listeners or per-prediction profile reads. Scoring remains absolute and unchanged.
+Every scoring-affecting writer must atomically change the unique revision `version` and mark `ready:false` before source changes. Only a complete owning recalculation certifies `ready:true`. Even unchanged recalculation claims/finishes a revision, requiring draw refresh; it avoids row writes, not source reads. Draw-only edits never change scores/profiles.
 
-`settings/leaderboardRevision` is an admin-only four-field document: unique string `version`, boolean `ready`, boolean `cleanupPending`, and server `updatedAt`. Scoring-affecting room/roster changes and initialization atomically invalidate it before cleanup. Status-only saves, locks and stage toggles do not. Cleanup blocks competing scoring changes/recalculations until it settles. Query/delete failures skip automatic recalculation and keep draws blocked; resolve leftovers before explicitly recalculating. If a page closes during cleanup, an authorized maintainer must confirm that no cleanup is running, resolve leftovers, and clear `cleanupPending` while keeping `ready:false` before recalculating. Never clear it just to permit a draw.
+Avoid unnecessary recalculations/listeners: initial loads, changes and reconnects incur reads. For illustration, 150 viewers loading 150 leaderboard rows imply about 22,500 initial reads, not an event measurement. Certified spins use two application document reads and two writes before retries/rule lookups; refresh queries the leaderboard once, not per ticket.
 
-Recalculation claims a unique dirty revision before reading sources. Changed/malformed rows are replaced, obsolete rows deleted, and unchanged rows retain their timestamps. Chunks of at most 450 row operations transactionally check revision ownership; only a complete owning recalculation marks it ready. Failed or superseded workers cannot certify partial rows. Even unchanged recalculations use two revision writes (claim/finish), but no row writes; refresh is then required. Spins use two application document reads and two atomic writes, with no leaderboard scan or per-ticket reads; contention/security-rule lookups add operations.
+**Leaderboard Management** previews selected UIDs and associated predictions/rows before removal. Any winner award/exclusion blocks the selection. Cleanup preserves Auth accounts, profiles, rooms, other participants and awards; it is not a ban. A durable `settings/participantCleanup` job fences source writes for selected owners, deletes in chunks of at most 450 and completes recalculation under its revision fence. Reload → **Load participants → Preview interrupted cleanup** to review/resume. Never manually clear this job or its pending fence.
 
-The estimates below count leaderboard-row writes only; revision control adds two writes and transaction reads per recalculation.
+Ordinary room prediction cleanup is separate: failures keep draws blocked and skip automatic recalculation. If interrupted, an authorized maintainer must establish that cleanup stopped and resolve leftovers before clearing its fence/recalculating; never clear `cleanupPending` simply to permit a draw. Reopen published descendants deepest-first, use Save Room for unpublished Ended descendants, and undo synthetic winners separately before refreshing.
 
-Refresh brackets one server leaderboard query with revision checks and preserves current exclusions transactionally. An unchanged certified refresh adds no writes. Undo deletes history and restores eligibility/historical tickets in one transaction; refresh reconciles those tickets with current scores, without pinning a historical override. Concurrent stale spins/edits fail rather than overwrite winners.
+## 2026 event results
 
-Integration requires compatible rules first, then Hosting, with all old admin tabs closed/reloaded. Recalculate once to initialize the revision, then refresh entries; no automatic migration or production recalculation runs. Every future leaderboard/source cleanup writer must atomically bump this revision and leave it dirty until recalculated. Old clients or direct backend writes that ignore the protocol are unsupported; pause admin operations during cutover.
+The historical captures in [docs/screenshots/dday-results/](docs/screenshots/dday-results/) document the completed event, not the current production database. All seven were visually reviewed; the maintainer approved their publication during this handover. No visible emails, Auth UIDs, credentials or billing-account identifiers were found. Competition captures contain player IDs/usernames; leaderboard and winner captures contain personal names. Approval is specific to these artifacts, not blanket permission for future participant exports. Recheck consent/redaction before reuse elsewhere; preserve originals.
 
-### Safe test-participant removal (#39)
+![Completed knockout bracket, including the 11–4 grand final](docs/screenshots/dday-results/knockout-dday.jpeg)
 
-Under **Admin → Prediction Settings → Leaderboard Management**, load participants, search by full name or UID, select one or several accounts, and preview removal. Confirm the displayed UIDs and prediction/leaderboard record counts. Duplicate names are not identities. Any Lucky Draw award record or winner exclusion blocks the entire selection; cleanup never deletes awards or exclusions.
+*`knockout-dday.jpeg`: Killerpill defeated NM69 11–4 in the final; the capture also records quarter-final and semi-final scores.*
 
-Removal deletes selected `leaderboard/<uid>` documents and all `predictions` documents whose `uid` matches, including legacy/duplicate submissions. It preserves Auth accounts, `profiles`, rooms, stage settings, other participants and scoring. Recalculation can adjust remaining sequential ranks without changing their scores. This is not a ban: preserved accounts may submit new predictions after cleanup completes.
+[3to4.jpeg — third-place result](docs/screenshots/dday-results/3to4.jpeg) records TETRIES_666 defeating SADONA 9–2. [5to8.jpeg — placement rounds](docs/screenshots/dday-results/5to8.jpeg) shows totals 18, 11, 10 and 11 with **all placings Pending** and an organiser decision outstanding. Do not infer a final fifth–eighth ranking from that image.
 
-`settings/participantCleanup` is an admin-only durable job containing the selected UIDs, operation/revision IDs, phase (`review`, `deleting`, `recalculating`, `complete`), deletion counts and server timestamp. Previewing is read-only. Execution claims a new dirty leaderboard revision with `cleanupPending:true`, then revalidates the preview against server data before deleting anything. Changed previews require another preview/confirmation. Rules freeze selected owners' prediction creates, edits and resets while the job is active; reads and profile edits retain their existing permissions. Other owners remain unaffected.
+[leaderboard-dday.jpeg — audience ranking snapshot](docs/screenshots/dday-results/leaderboard-dday.jpeg) shows a leading score of 15 and three visible tied rows at 12, not a full participant count. [luckydraw-winners.jpeg — winner history](docs/screenshots/dday-results/luckydraw-winners.jpeg) shows 11 records dated 28 November, with ticket counts at win; it does not establish prize claims or a complete audit log.
 
-Every deletion chunk (at most 450 deletes plus its job update) checks job/revision ownership and current winner exclusions transactionally. Award lookups query selected UIDs in groups of at most 30; no per-ticket reads or listeners are added. The existing scorer, profile queries, ranking and changed-row writer perform recalculation under the same pending fence. Only the final transaction marks both the job complete and the revision ready. Refresh Lucky Draw entries afterwards; stale tickets cannot spin.
+![Firestore usage snapshot showing rounded operation totals](docs/screenshots/dday-results/firebase-usage.jpeg)
 
-**Recovery:** after a query, deletion, recalculation or acknowledgement failure, reload the dashboard, select **Load participants → Preview interrupted cleanup**, review remaining counts, and confirm again. The server retains UIDs even after their rows disappear. Retries use a new revision to fence old workers, query only remaining records, and preserve cumulative committed deletion counts. A failed/interrupted job keeps draws and competing scoring operations blocked, including during recalculation. Never manually clear this job or `cleanupPending`; resume through the dashboard. A complete job proves its final recalculation committed even if the browser missed the acknowledgement. No automatic recovery or destructive action runs on sign-in.
+*`firebase-usage.jpeg`: approximately 62K reads, 2.6K writes and 59 deletes for the displayed Nov 27–Nov 28 (PST) quota period. The console warns these metrics may differ from billing/quota usage.*
 
-**Required #29 integration for Eve — release coordination, not an assumed schema:** this branch has no audience import/base participation source records. Before shipping #29 with cleanup, add every persisted base-award, registration/import and UID-link source that can recreate a leaderboard row to this removal's UID-scoped preview, revalidation, deletion and resumable counts. Delete the selected participant's recreating records, not merely their computed row; preserve unrelated import participants, Auth accounts, public profiles, awards and exclusions. If an import document contains multiple participants, remove only the selected identities transactionally. Extend the active-job owner/source-write fence to registration, linking, import and base-award writers so they cannot recreate sources during recovery. Do not choose collection names here or delete competitor rosters.
+[firebase-usage2.jpeg — subscriptions and rule metrics](docs/screenshots/dday-results/firebase-usage2.jpeg) shows peaks of 309 snapshot listeners and 74 active connections, plus approximately 33K allows and 174 denies. Connections/listeners are not unique attendees; denies alone do not prove abuse. These images do not establish costs, remaining quota or the current billing plan.
 
-Eve must also integrate **every** #29 scoring/source writer with #27: atomically invalidate `settings/leaderboardRevision` (`version` changes, `ready:false`) before changing scoring sources; reject overlap with pending cleanup, and fence chunked writes/recalculation by revision ownership. Only complete owning recalculation may certify `ready:true`; preserve `cleanupPending:true` for this job until its final atomic completion. Extend the existing absolute scorer/recalculator to include approved #29 sources, and extend cleanup emulator tests for mixed selected/unselected imports, retries, concurrent import/link writes and stale draw rejection. Do not deploy #29 and this cleanup together without that integration.
+The handover reports nearing 40K reads around lunch and a supervisor linking billing to switch to Blaze. Preserve that as the author's account, not independently verified infrastructure state. Arrange billing ownership, budgets/alerts and recovery early; budget alerts do not cap spending. See [Firestore free quotas](https://firebase.google.com/docs/firestore/quotas#free-quota), [listener billing](https://firebase.google.com/docs/firestore/pricing#listening_to_query_results), [Firebase plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans) and [Hosting quotas](https://firebase.google.com/docs/hosting/usage-quotas-pricing).
 
-Stored ranks preserve descending correct counts, alphabetical names and stable ordering for identical names. Public ties still share a rank, with UID ordering after name comparison. A rename can legitimately move several stored ranks within a tie. Full-name changes never change prediction selections or UID-based entry ownership. Reopening still clears results and dependent predictions through the existing workflow; recalculation simply reflects the remaining published results.
+## Known limitations and future improvements
 
-Illustrative estimates below assume 150 leaderboard rows, 150 connected leaderboard viewers and 150 participating profiles. They are **not production usage or emulator billing measurements**:
+No bugs were fixed in this handover. Investigate before choosing a permanent solution:
 
-| Per recalculation | Before optimisation | After optimisation |
-| --- | ---: | ---: |
-| Additional profile document reads | 0 | 150 |
-| Writes when all rows are unchanged | 150 | 0 |
-| Update-driven viewer reads when unchanged | 22,500 | 0 |
-| Writes when exactly five persisted rows change | 150 | 5 |
-| Update-driven viewer reads for those five changes | 22,500 | 750 |
+- **D-Day `Participant` names:** reported by the operator. Investigate profile initialization, permission/load failures, placeholder policy and recalculation/synchronization timing. These are investigation paths, not confirmed causes. Consider requiring a valid full name before predictions as a separate product/security decision; current rules do not require a profile. Never restore email-derived public names.
+- **Draw startup latency:** reportedly about 10 seconds with roughly 200 entries. Measure refresh/network, pool construction, rendering and animation separately on synthetic data; the cause is unverified. The intended animation duration is not a measured startup bottleneck.
+- **Draw scale:** every ticket occupies an entry in one Firestore document and a gradient segment. There is no aggregate pool cap; large configured pools risk the 1 MiB document limit and rendering cost. History and refresh use collection reads, not paginated event archives.
+- **UI/UX:** test first-time navigation, information density, long names and mobile/desktop presentation with users and synthetic accounts. Personal statistics lack direct dedicated regression coverage.
+- **Read usage:** changed-row suppression exists, but listeners/reconnects and recalculations still cost reads. Avoid repeated recalculation, broad profile listeners and per-ticket/per-prediction queries; review the duplicate owner-profile read on Leaderboard.
+- **Security/infrastructure:** review administrator recovery, provider-side anti-abuse enforcement, monitoring and browser rendering boundaries. Source does not establish deployed provider settings or a compromise. A disabled button is not rate limiting.
+- **Load/contingency:** test realistic concurrent operators/viewers, shared venue Wi-Fi and interrupted cleanup in isolation; prepare an offline process and divide operator responsibilities. Avoid major last-minute changes.
+- **Identity/import gaps:** no registration registry, structured Forms importer, verified Forms/Google linking or base leaderboard points. Names-only manual import does not prevent duplicate real-person eligibility.
+- **Documentation/validation gaps:** FAQ and several public-page labels omit the base draw ticket; the leaderboard “Picks / Entries” column is `correct`, not total draw tickets. README_FIRST has obsolete create-project/combined-deploy and cleanup claims. CSV preview may list more dependents than targeted save resets; manual roster editing has weaker uniqueness checks. THIRD is FT9 despite the historical FT5 rulebook question.
+- **Third-party assets:** verify embedding/redistribution rights for bundled Google Sans/Mono fonts and branding before reuse; no license grant for them is established by this handover.
 
-For `P` prediction documents, `R` rooms, `L` existing leaderboard rows and `F` returned profiles, administrator document reads are approximately `P + R + L + F`, before query minimums and security-rule lookups. An empty profile query still costs at least one read. Up to 150 UIDs require at most five profile query requests, not one request per prediction. Owner profile loading costs one read per signed-in page/session load; each successful save/reset costs one write. Moderation list loads are explicit additional reads.
+GitHub issues/merged PRs were reviewed on 28 November 2026. [#15](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/15) (admin anti-abuse/monitoring) and [#37](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/37) (security triage/hardening, not a confirmed exploit) remain open. Closed issue text can describe earlier proposals: closure is not proof every acceptance criterion shipped.
 
-Initial public leaderboard subscriptions still read all rows: 150 viewers × 150 rows is approximately 22,500 initial reads. Reconnects can repeat that cost, and genuine score/rank changes can still affect many or all rows. Room/prediction listeners and Lucky Draw refreshes also consume reads. These changes reduce redundant broadcasts; they do not guarantee the event stays within the 50,000-read daily allowance.
+In particular, [#29](https://github.com/GDGoC-USM/gamefest-tetrio-2026/issues/29) is closed, but its proposed base **points** and Forms linking are not implemented. Shipped scope includes [#46](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/46) (names import), [#51](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/51) (wheel/presentation) and [#54](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/54) (base **tickets**). Personal statistics shipped in [#52](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/52), removal/restore in [#58](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/58), and concise draw status in [#57](https://github.com/GDGoC-USM/gamefest-tetrio-2026/pull/57). Shared auth/profile behavior exists but does not establish that every D-Day name/session symptom is resolved.
 
-See [Firestore listener billing](https://firebase.google.com/docs/firestore/pricing#listening_to_query_results) and [free quotas](https://firebase.google.com/docs/firestore/quotas#free-quota). Run the synthetic tests below for measured application-operation counts; those counts are not Firebase production billing.
+## Development and safe verification
 
-The live billing plan and remaining quotas cannot be established from repository configuration. For Spark planning, current published limits are:
+Read [AGENTS.md](AGENTS.md), the human handover and affected source first. `README_FIRST.txt` is historical context, not current setup/recovery authority. Never commit participant CSVs/exports, passwords, service-account files, private keys or tokens. Keep synthetic artifacts in ignored `.local/`; `.gitignore` does not remove committed secrets.
 
-| Resource | No-cost allowance |
-| --- | --- |
-| Firestore reads | 50,000/day |
-| Firestore writes / deletes | 20,000/day each |
-| Firestore stored data | 1 GiB; one free database/project |
-| Firestore outbound transfer | 10 GiB/month |
-| Hosting storage / transfer | 10 GB stored / 10 GB per month transferred |
+### Setup and project identity
 
-Firestore daily quotas reset around midnight Pacific time. Hosting quotas are shared across sites/channels; exhausted Spark quotas can interrupt service or prevent deployment, not automatically provide paid overage. The application has no Cloud Functions or scheduled backend scorer. Do not assume paid monitoring, backups or Functions are available on Spark; billing changes need separate approval. See [Spark/Blaze plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans) and [Hosting quotas](https://firebase.google.com/docs/hosting/usage-quotas-pricing).
-
-## Getting started
-
-Install [Git](https://git-scm.com/downloads), a supported [Node.js LTS](https://nodejs.org/) with npm and **Java 21 or later** for the current Firestore emulator. The audit found Node 26.13.0, npm 11.20.0 and Firebase CLI 15.37.0 locally; these are observed versions, not a project-enforced toolchain. Install the CLI separately (there are no application dependencies):
-
-```sh
-npm install -g firebase-tools@15.37.0
-```
-
-Check `git --version`, `node --version`, `npm --version`, `firebase --version` and `java -version`. The CLI package requires Node 20+, but its Hosting dependency declares Node 20/22/24; prefer supported Node 24 LTS. The audit's Node 26 installation succeeded with an `EBADENGINE` warning, not a clean compatibility result. Java 21+ must be selected through `JAVA_HOME` and `PATH`, not merely installed alongside Java 17. On Windows reopen the terminal after choosing the JDK and verify its selection. First startup may download emulator binaries/UI; browser SDK imports also need internet access.
-
-Clone the repository and open its folder:
+Install Git, supported Node.js LTS (prefer Node 24), npm, Firebase CLI and **Java 21+ selected by `JAVA_HOME`/`PATH`**. There is no root dependency installation, `.env` loader, `npm test` or build command.
 
 ```sh
 git clone https://github.com/GDGoC-USM/gamefest-tetrio-2026.git
 cd gamefest-tetrio-2026
+npm install -g firebase-tools@15.37.0
 ```
 
-### Keep the configured Firebase project
+Check `git --version`, `node --version`, `firebase --version` and `java -version`. Older audit tooling used Node 26 with engine warnings; that is not a compatibility guarantee. First emulator startup may download binaries.
 
-The checked-in browser configuration/default deployment project are **`gamefest-tetrio-2026`**. Keep `.firebaserc`, `firebase.json`, workflows and `public/js/firebase-config.js` unchanged for normal contribution/local preview. Do not run `firebase init`, create a replacement project, add aliases or copy different web configuration into this repository. Changing GitHub ownership does not change the Firebase backend.
+Keep Firebase project ID **`gamefest-tetrio-2026`**, `.firebaserc`, `firebase.json`, browser configuration and workflows unchanged unless explicitly authorized. Do not run `firebase init`, create replacement aliases/projects or change branding URLs as setup. The old `gamefest-tetrio-showdown.web.app` address belongs to the predecessor described in the handover, not this repository's current documented site. Public Firebase web configuration is not a privileged credential.
 
-There is no `.env` loader, required environment-variable file, root `npm install`, build or application server. The checked-in configuration serves the static site. Demo emulators need no real Firebase project or Firebase login; production login/provider/project setup are separately authorized maintainer tasks.
+Run from the root:
 
-Firebase web configuration is public browser configuration, not an administrator secret. Never commit account passwords, service-account JSON files, private keys, or deployment tokens. `.env` files are ignored, but this application does not currently load environment variables.
+```sh
+firebase emulators:start --only auth,firestore,hosting --project demo-gamefest
+```
 
-### Grant administrator access
+Hosting normally uses `http://localhost:5000`; Auth/Firestore use `127.0.0.1:9099`/`:8080`, emulator UI `:4000`. Serve HTTP, not `file://`. Exactly `localhost`, `127.0.0.1` and `[::1]` activate emulator routing with no production fallback. LAN/custom hosts and deployed/preview hosts do not. Run all three services.
 
-There is no hardcoded administrator password. The following describes **authorized backend provisioning**, not a local-preview prerequisite. Use only synthetic identities in an aligned local emulator namespace; never create a production administrator merely to test setup.
+**Namespace caveat:** `--project demo-gamefest` does not rewrite the browser's `gamefest-tetrio-2026` configuration. The generic command alone is not proof of isolated authenticated flows. For the existing draw browser harness, prepare an ignored demo-only Hosting copy:
 
-1. Sign in with the intended Google account, or create an Email/Password user in Firebase Authentication.
-2. Copy the account's UID from Authentication's user list.
-3. Using the Firebase console, create `admins/<UID>` in Firestore with the string field `role` set to `admin`.
-4. Open `/admin/index.html` and sign in with that account.
+```sh
+node tests/lucky-draw.browser.mjs --prepare
+firebase emulators:exec --config .local/pr51/firebase.json --only auth,firestore,hosting --project demo-pr51 "node tests/lucky-draw.browser.mjs"
+```
 
-The supplied Firestore rules restrict administrative writes and prevent browser clients from granting themselves admin roles. Hiding the dashboard alone is not a security boundary; deploy the rules to the selected project.
+The harness needs Playwright installed outside the application (`PLAYWRIGHT_MODULE` can point to its absolute package directory). Preparation copies `public/` into `.local/pr51/public/` and changes only that ignored copy's configuration to `demo-pr51`; rerun after source edits. It uses synthetic Email/Password admin data, checked-in rules, loopback services and backend-request restrictions. Never deploy that copy. Rule tests do not verify Google popup/provider behavior.
 
-Home, Matches, Predict and Leaderboard share `auth-ui.js`: Home-reference header buttons, signed-in indicators, explicit accessible session restoration and busy/error states. Google popup sign-in and the SDK's existing default persistence are unchanged; same-origin restoration does not imply session sharing across preview/deployed origins or browsers with blocked storage. Sign out before choosing another Google account. Predict clears profile, saved picks, drafts and pending-operation UI on auth changes and guards stale completions by account/epoch. A denied Admin visit keeps the audience session signed in while the dashboard remains hidden and server-enforced permissions remain unchanged; explicitly sign out to switch administrator accounts. Profile failures do not sign users out; Predict offers a retry.
+Admin provisioning requires Firebase Auth plus `admins/<UID>` with `role: "admin"`, created through authorized trusted tooling/emulator UI, not browser self-grant. Production provisioning/provider/domain changes need separate approval; never create a live admin for testing.
 
-If session restoration fails, the shared control stops announcing a busy restoration and offers **Reload to retry**. The status explicitly says that sign-in could not be verified; it does not claim the account is signed out. Allow browser storage before reloading. Firebase's persistence setting is unchanged, and blocked storage may prevent sign-in or leave only a page-local session; navigation/refresh persistence is not promised in that environment.
+### Competitor roster import
 
-For an approved production release, a maintainer must confirm the existing project's providers and authorized deployed domains; this audit did not inspect/change them. Firestore permissions, not hidden navigation or a known email, enforce admin access. See [AGENTS.md](AGENTS.md#firestore-data-and-permissions) for collection schemas/access boundaries.
-
-### Import a participant roster
-
-After initializing the tournament, open **Admin → Rooms → Import roster CSV**. Export an Excel or Google Sheets list as UTF-8 CSV with this exact header and column order:
+**Admin → Rooms → Import roster CSV**, with exact UTF-8 header/order:
 
 ```csv
 room,participantId,username
@@ -248,123 +248,11 @@ A,TEST001,ExampleOne
 B,TEST002,ExampleTwo
 ```
 
-Choose the file and select **Preview CSV**. Review all assignments, empty-slot counts, changed groups and dependent-room resets, then select **Save imported roster** and confirm. Previewing does not write to Firestore. No CLI import, service-account credential or project configuration change is needed.
+Preview, review and confirm **Save imported roster**. Listed A–D rosters are replaced in file order (up to eight each); blanks fill spare slots, omitted groups stay unchanged. IDs remain text; case-insensitive duplicate IDs/usernames, including omitted-group collisions, are rejected. Quoting, BOMs and Windows line endings are supported. Matching IDs retain keys; legacy no-ID players may match usernames. Moving/reusing an identity may require clearing its old slot first. Reopen published groups; targeted downstream resets/cleanup retain imported groups' own predictions. Stale previews require preview again. This CSV path is separate from draw names import.
 
-- Only groups A–D are accepted, with at most eight participants per group. All three fields are required. Duplicate participant IDs and usernames are rejected case-insensitively, including collisions with groups omitted from the CSV.
-- Each listed group's entire roster is replaced in file order; unused slots become empty. Omitted groups are unchanged. Participant IDs remain text, preserving leading zeros. Quoted CSV fields, UTF-8 BOMs and Windows line endings are supported.
-- Matching existing participant IDs retain immutable player keys, even when a username changes. Legacy players without IDs can be matched by username. To move an existing participant between groups or reuse a username with a different ID, clear the old slot in the dashboard first.
-- Published groups must be explicitly reopened before their rosters can change. Saving changed rosters resets dependent rooms and deletes their predictions, but retains predictions for the imported groups, just like manual roster edits. Recalculation follows the save.
-- If rooms change after preview, preview the CSV again. An identical import has nothing to save.
+### Focused checks
 
-Keep real participant CSVs outside the repository, or in the ignored `.local/` directory. Test imports using synthetic data and the local emulators, never the live event database.
-
-### Run locally
-
-From the **repository root** (containing `firebase.json`), start the isolated demo CLI environment:
-
-```sh
-firebase emulators:start --only auth,firestore,hosting --project demo-gamefest
-```
-
-Open the Hosting URL printed by the CLI, normally `http://localhost:5000`. Serve the site over HTTP rather than opening HTML files with `file://`. `firebase.json` configures Authentication on port `9099`, Firestore on `8080`, and Hosting on `5000`.
-
-On exactly `localhost`, `127.0.0.1` or `[::1]`, the client routes Auth/Firestore to `127.0.0.1:9099`/`127.0.0.1:8080`; unavailable emulators do not fall back to production. The emulator UI normally opens at `http://127.0.0.1:4000`. Run all three services, not Hosting alone; the client expects those fixed Auth/Firestore ports.
-
-**Authenticated browser verification:** the generic `demo-gamefest` command does not rewrite the browser's production project ID. For isolated Lucky Draw browser checks, prepare an ignored Hosting copy with a demo-only configuration, then start all three emulators in that same namespace:
-
-```sh
-node tests/lucky-draw.browser.mjs --prepare
-firebase emulators:exec --config .local/pr51/firebase.json --only auth,firestore,hosting --project demo-pr51 "node tests/lucky-draw.browser.mjs"
-```
-
-The browser check requires Playwright installed outside the application; set `PLAYWRIGHT_MODULE` to its absolute package directory if it is not available through Node's normal module resolution. Select Java 21+ first. The preparation copies `public/` into `.local/pr51/public/` and replaces only that ignored copy's `firebase-config.js` with synthetic `demo-pr51` configuration. Re-run preparation after source changes. Tracked Firebase identifiers, permissions and production configuration remain unchanged; checked-in rules are loaded into the demo emulator. Do not serve this copy on a deployed host or use live accounts.
-
-The test signs in through the actual admin page with a synthetic Email/Password account, exercises refresh/spin/history/reload/undo/import, participant removal/restore and stale-editor/revision rejection, checks presentation bounds and status-message clipping at 4K/1080p/desktop/mobile/short-landscape sizes, and saves screenshots/results under `.local/pr51/`. External application-backend requests are blocked. The default `demo-gamefest` startup is still only an HTTP preview unless its browser configuration is separately aligned. See Firebase's [project-ID alignment requirement](https://firebase.google.com/docs/emulator-suite/connect_firestore#choose_a_firebase_project).
-
-Use only loopback URLs. LAN IPs, custom hostnames and deployed/PR-preview hosts do not enable emulator routing and retain production configuration. Never use them for destructive testing. `Ctrl+C` stops the suite; without explicit import/export, emulator state is disposable. Keep synthetic artifacts in ignored `.local/`, never real participant exports.
-
-### Post-testing cleanup
-
-On isolated test data, use existing controls rather than mass-deleting collections:
-
-1. Stop submitting predictions; close stages/lock affected rooms before cleanup.
-2. Reopen published descendants deepest-first: FINAL/THIRD/PLACEMENT, then semi-finals, quarter-finals and groups as applicable. For unpublished Ended rooms use **Save Room → Upcoming**.
-3. Use **Reopen / Unpublish Results** for the tested published room. Its roster/own predictions remain; changed downstream feeders reset and their predictions are deleted. Review the actual affected-room confirmation.
-4. Check partial-cleanup errors, then **Recalculate leaderboard**. Recalculation repairs totals but does not delete leftover picks. Do not republish before cleanup is resolved: survivors can otherwise score.
-5. Undo synthetic Lucky Draw winners separately, then **Refresh Latest Entries**. Reopening preserves history/exclusions but invalidates old pools. Undo restores historical tickets atomically; refresh validates current scores before another spin.
-
-Reopen is not an account/profile/prediction wipe or migration shortcut. Restart disposable emulators without import for a fresh session. Production cleanup, reopening and draw undo require separate explicit authorization.
-
-## Team collaboration: branch → pull request → main
-
-`main` is the shared, reviewed version. **Everyone, including AI contributors, works on a separate branch. Do not commit or push changes directly to `main`.** A pull request (PR) asks the team to review and merge your branch; pushing a branch does not merge it.
-
-### 1. Start a task from the latest main
-
-First run `git status`. If it shows unfinished changes, finish them on their current branch or ask a teammate for help before switching branches.
-
-```sh
-git switch main
-git pull --ff-only origin main
-git switch -c feature/homepage-layout
-```
-
-Use a new, descriptive branch for each task, such as `feature/prediction-summary`, `fix/mobile-navigation`, or `docs/setup-guide`. Replace the example branch name with your own.
-
-### 2. Make, check, and commit your changes
-
-Keep each branch focused on one task. Preview the affected pages, check the browser console, and test the behavior you changed using test data.
-
-```sh
-git status
-git diff
-git add public/index.html public/css/style.css
-git diff --staged
-git commit -m "Improve homepage layout"
-```
-
-The filenames and commit message above are examples: stage only the files you intentionally changed. Check that credentials, logs, and unrelated work are not included.
-
-### 3. Push your branch and open a PR
-
-```sh
-git push -u origin feature/homepage-layout
-```
-
-On [GitHub](https://github.com/GDGoC-USM/gamefest-tetrio-2026), open **Pull requests → New pull request** (or use **Compare & pull request** after pushing):
-
-- Set **base** to `main` and **compare** to your task branch.
-- Explain what changed and why.
-- List what you tested; include screenshots for visual changes.
-- Mention Firebase configuration, rules, or data-impacting changes explicitly.
-- Request review from at least one teammate and wait for approval.
-
-For requested changes, edit, commit, and push to the same branch. The PR updates automatically. If Git reports conflicts, ask a teammate for help rather than force-pushing or discarding work.
-
-### 4. Merge after review
-
-A maintainer merges the approved PR on GitHub. Do not merge your own unreviewed PR or bypass review. After it is merged, start the next task from an updated `main`:
-
-```sh
-git switch main
-git pull --ff-only origin main
-git switch -c fix/mobile-navigation
-```
-
-### Enforce review on GitHub
-
-These documents describe the workflow; they do not enforce it. A repository administrator should configure a branch ruleset or branch protection for `main` in **Settings**:
-
-- Require a pull request before merging.
-- Require at least one approving review.
-- Block force pushes and branch deletion.
-- Avoid bypass permissions where possible.
-
-Availability depends on the repository's visibility and GitHub plan. Until protection is enabled, the team must follow this workflow manually.
-
-## Verification before a PR
-
-Run commands from the repository root and choose files relevant to your change. There is no `npm test`, build/lint script or checked-in automated test workflow. Existing dependency-free regressions:
+Choose checks relevant to a change, from the root. Dependency-free examples:
 
 ```sh
 node --test tests/tournament.test.mjs tests/roster-import.test.mjs
@@ -372,77 +260,45 @@ node --test tests/auth-ui.test.mjs tests/usernames.test.mjs tests/profile-initia
 node --test tests/lucky-wheel-geometry.test.mjs tests/lucky-draw-import.test.mjs
 ```
 
-These cover tournament/scoring/feeders/statuses, CSV import, names/profile initialization, leaderboard ranking/delta planning, wheel pointer/winner geometry and bulk participant parsing without Firebase access. They do not prove transaction races, browser auth restoration, rendered wheel layout or production usage.
-
-With Java 21+ selected, run isolated rules checks:
+With Java 21+ selected, use loopback Firestore and synthetic namespaces:
 
 ```sh
-firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
+firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/profiles.rules.test.mjs tests/prediction-lock.rules.test.mjs"
+firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/lucky-draw.rules.test.mjs tests/leaderboard-revision.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
+firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/participant-cleanup.rules.test.mjs"
 ```
 
-Focused draw/revision checks:
+Rule tests install rules in unique demo namespaces, reject non-loopback hosts and clean fixtures. Without `FIRESTORE_EMULATOR_HOST` they skip: **a skip is not a pass**. Stop conflicting emulators before using their ports. No live account/service-account key is needed.
 
-```sh
-firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/lucky-draw.rules.test.mjs tests/leaderboard-revision.rules.test.mjs tests/leaderboard-sync.rules.test.mjs tests/profiles.rules.test.mjs"
-```
+For UI changes inspect actual HTTP pages on desktop/mobile and console errors. Auth/prediction/scoring/draw changes need synthetic allowed/denied and stale/concurrent paths. The draw harness covers refresh, spin, history, reload, undo, imports, removal/restore, stale state and viewport bounds; it is not a full load/security audit.
 
-Focused participant-cleanup checks (including authorization, recovery and unchanged scoring):
+For documentation-only work, check relative links/anchors, files, source/configuration claims, preservation hashes and `git diff --check`; do not run application flows or contact production merely to verify prose. Report checks actually run, not historical test counts.
 
-```sh
-firebase emulators:exec --only firestore --project demo-gamefest "node --test tests/participant-cleanup.rules.test.mjs tests/prediction-lock.rules.test.mjs tests/leaderboard-sync.rules.test.mjs"
-```
+## Collaboration and deployment
 
-Stop an existing suite first if it occupies port 8080. `emulators:exec` starts Firestore, sets `FIRESTORE_EMULATOR_HOST` for its child and stops it afterwards. Tests reject non-loopback hosts, use unique disposable `demo-*` namespaces, install checked-in rules and clean their fixtures. They check allowed/denied profiles/moderation, exact public leaderboard schemas, private predictions, room locks/stages/readiness/results and absolute leaderboard sync. No Auth emulator login/service-account key is needed. Without `FIRESTORE_EMULATOR_HOST`, rule tests **skip**; a skip is not verification.
+Inspect branch/status, staged/unstaged/untracked files and recent commits before editing. Preserve teammate changes; no reset/discard/stash or unrelated staging. Reuse an existing task branch. For a new clean task on `main`, update with `git pull --ff-only origin main`, then create a descriptive branch. If synchronization is requested on an existing branch, fetch/compare first and fast-forward where possible; resolve conflicts without overwriting local work.
 
-For browser changes, serve HTTP, inspect desktop/mobile layout and check console errors. Authenticated flows require aligned isolated Auth/Firestore namespaces/rules; the current demo/browser mismatch above is a blocker, not a passing flow:
+Commit only intended files after review/checks. Suggested handover commit: `docs: finalize GameFest 2026 documentation and handover`. Never commit/push directly to `main`, force-push or rewrite shared history. Push/open a PR only when authorized. Target `main`, describe checks/limitations and configuration/rules/data impacts, attach screenshots for UI changes and request at least one human review. A maintainer merges after approval; AI agents do not merge automatically. Configure branch protection separately; prose does not enforce it.
 
-- Public pages: navigation, loading/error states, room/results views and responsive layout.
-- Profiles/auth: synthetic sign-in, valid Google defaults/custom-name preservation, save/refresh, invalid-name rejection, sign-out/account switching and restoration; no prior-user state may leak.
-- Predictions: two distinct group qualifiers or one series winner; stage/room/status locking, save/edit/reset denial and pending/resolved results.
-- Administration: unauthorized access, publish/direct correction/reopen, targeted feeder resets, partial-cleanup errors, recalculation and full-name moderation.
-- Lucky Draw: refresh after recalculation, inspect weights, zero-entry exclusion, winner reveal, persistence/undo. Do not claim freshness/concurrency/pointer accuracy before open issues are fixed and tested.
-- Security: check allowed/denied requests through rule tests, not merely hidden UI.
+**Production is not a test environment.** Never deploy, reset/migrate, publish/reopen results, recalculate live scores, spin/undo draws or modify production data without explicit authorization. Preserve historical results and documentation.
 
-Documentation-only changes need path/link/configuration and command checks, not live backend access. Report exact results, versions and blockers in the PR; installation/startup does not prove all flows. Perform post-test cleanup only on isolated data.
-
-### Setup verification record
-
-Audit verification on 2026-11-26, without production-data access:
-
-| Check | Observed result |
-| --- | --- |
-| Clone from the GDGoC-USM repository into an isolated folder | Succeeded |
-| `npm install -g --prefix .local/firebase-cli firebase-tools@15.37.0` | Succeeded; Node 26 `EBADENGINE`, deprecation and install-script-policy warnings |
-| Two Node commands above | 21 and 29 tests passed; no failures/skips |
-| Firestore `emulators:exec` command above | Initially blocked by selected Java 17; passed all 29 tests after selecting installed Java 25.0.4.1 |
-| Auth/Firestore/Hosting startup from the clean clone's root | All three ready at configured ports; UI at 4000 |
-| Browser Home, Matches, Predict, Leaderboard and Admin | All HTTP 200; no captured JavaScript/console errors during signed-out navigation |
-| Markdown local links/anchors and referenced paths | Checked against this checkout |
-
-The isolated CLI was invoked through its installed Node entry point rather than changing the machine's global installation. Browser network inspection confirmed loopback Firestore requests still name `gamefest-tetrio-2026`; no real sign-in, privileged browser flow, production provider/rule state, wheel outcome or deployment was verified. The namespace mismatch remains a documented implementation blocker. Installation warnings and successful tests do not certify Node 26 support; use the supported LTS recommendation above.
-
-
-## Deployment
-
-Deployment is a maintainer action after review and explicit authorization; these commands are a runbook, **not local verification**. Keep the configured project/targets unchanged. This audit did not execute production deployment or verify remote rules/provider/billing state.
-
-For releases depending on changed rules, pause admin result changes, recalculations and draws. Deploy/confirm compatible **rules first**, then release Hosting:
+The two GitHub workflows deploy Hosting only: same-repository PRs create previews; pushes to `main` deploy live. Neither runs tests nor deploys rules. Previews still use the production backend. For an approved rules-dependent release, pause admin operations, deploy compatible rules **before** Hosting, then reload old clients:
 
 ```sh
 firebase deploy --only firestore:rules --project gamefest-tetrio-2026
 firebase deploy --only hosting --project gamefest-tetrio-2026
 ```
 
-Hosting workflows do **not** deploy rules or run tests: a push/merge to `main` deploys live Hosting; a same-repository PR creates a Hosting preview. Coordinate required rules **before** the Hosting-only cutover; listing both products in one deploy command is not an ordered release procedure. Do not manually duplicate a successful automatic Hosting release unless a maintainer chooses that path.
+These are authorization-gated runbook commands, not verification steps; do not duplicate an automatic Hosting release unnecessarily. Confirm deployed rules/providers with authorized maintainers. Base-ticket cutovers require reloading admin tabs and refreshing old-policy pools. Deployment does not repair old public documents or authorize recalculation. Rollback must preserve profile privacy/predictions/history; prefer a privacy-preserving forward fix over code that republishes identity fields or weaker rules.
 
-For full-name/privacy releases, rules-first permits Unicode profiles and strict public leaderboard rows before the editor runs. Previews still use production backend configuration/current deployed rules, not a test database; new preview code may be incompatible with unreleased rules. Close/reload public/admin tabs before resuming. If Hosting fails, prefer a privacy-preserving forward fix rather than weakening validation.
+## Contributors
 
-After Hosting deploys, require administrators to reload the dashboard. Verify access with approved accounts before resuming operations. A maintainer must separately authorise any production recalculation that replaces stale public names/fields; deployment alone does not clean existing Firestore documents. Do not inspect or repair production data merely to verify this release.
+**Fred, Eve and Jayne — GameFest TETR.IO Showdown 2026 Technical Department.**
 
-Rollback: revert application commits in reverse order, but review the privacy impact before restoring older code or rules. Old recalculation code can republish prediction identities. Keep private profiles private; do not delete profiles, predictions or draw history as a rollback shortcut. Prefer a privacy-preserving forward fix over restoring the original leak.
+Verified GitHub attribution includes Eve ([evelyntan-design](https://github.com/evelyntan-design), wheel/presentation PRs) and Jayne ([jt-531081](https://github.com/jt-531081), personal statistics/confetti PRs). [JavanMyna](https://github.com/JavanMyna) authored repository setup and maintenance PRs; no unverified mapping of that account to Fred is asserted here. Thanks to the team for development, review and event operations.
 
-No deployment/production-data operation belongs to local verification. Branch pushes and PR creation are separately authorized collaboration actions; opening a PR can trigger the existing preview workflow even for documentation changes. Do not merge, push to main or execute production deployment commands without required review/authorization.
+## Licensing status
 
-## AI contributors
+**MIT licensing is pending maintainer/copyright-holder approval.** Authorization from GDGoC USM and relevant copyright holders has not been established; therefore this handover adds no `LICENSE` or MIT badge and makes no MIT grant.
 
-Read [AGENTS.md](AGENTS.md) before running commands or editing this repository. Keep documentation current when setup, behavior, or the collaboration workflow changes.
+Proposed notice, only after approval: `Copyright (c) 2026 GDGoC USM`. Once authority is documented, add the complete standard MIT text in root `LICENSE`, link it here and add the MIT badge. Preserve third-party notices/licenses. A software license must not be presented as permission to redistribute private participant data, third-party branding or font assets whose rights have not been established.
